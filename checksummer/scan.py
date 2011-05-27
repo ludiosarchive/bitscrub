@@ -27,6 +27,7 @@ import zlib
 import operator
 import win32file
 import ctypes
+import hashlib
 from collections import namedtuple
 
 try:
@@ -36,7 +37,7 @@ except ImportError:
 
 
 ADS_NAME = u"_M"
-VERSION = "\x03"
+VERSION = "\x04"
 
 
 class StaticBody(tuple):
@@ -55,13 +56,20 @@ class StaticBody(tuple):
 		return '%s(%r, %r, %r)' % (self.__class__.__name__, self[1], self[2], self[3])
 
 
+	def getChecksumsDigest(self):
+		return hashlib.sha1("".join(self.checksums)).digest()
+
+
 	def encode(self):
+		joinedChecksums = "".join(self.checksums)
+		checksumsDigest = hashlib.sha1(joinedChecksums).digest()
 		return (
 			VERSION +
 			"\x00" +
 			struct.pack("<d", self.timeMarked) +
 			struct.pack("<Q", self.mtime) +
-			"".join(self.checksums))
+			checksumsDigest +
+			joinedChecksums)
 
 
 
@@ -116,6 +124,11 @@ def decodeBody(fh):
 		mtime = struct.unpack("<Q", fh.read(8))[0]
 	else:
 		mtime = None
+	if version >= 4:
+		checksumsDigest = fh.read(160/8)
+	else:
+		checksumsDigest = "\x00" * (160/8)
+	# Note: checksumsDigest isn't validated anywhere yet
 	if not isVolatile:
 		checksums = []
 		while True:
