@@ -247,6 +247,10 @@ def writeToBothOuts(msg):
 	sys.stderr.write(msg + "\n")
 
 
+def writeToStderr(msg):
+	sys.stderr.write(msg + "\n")
+
+
 def setChecksumsOrPrintMessage(f):
 	try:
 		setChecksums(f)
@@ -264,7 +268,7 @@ def verifyOrSetChecksums(f):
 		body = None
 
 	if body is None:
-		print "NEW\t%r" % (f.path,)
+		writeToStderr("NEW\t%r" % (f.path,))
 		setChecksumsOrPrintMessage(f)
 	else:
 		if isinstance(body, StaticBody):
@@ -284,7 +288,7 @@ def verifyOrSetChecksums(f):
 				if checksums != body.checksums:
 					writeToBothOuts("CORRUPT\t%r" % (f.path,))
 				else:
-					print "CHECKED\t%r" % (f.path,)
+					writeToStderr("CHECKED\t%r" % (f.path,))
 
 
 def main():
