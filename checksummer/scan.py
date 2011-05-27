@@ -1,3 +1,22 @@
+"""
+Some useful documentation:
+
+How To Use NTFS Alternate Data Streams
+http://support.microsoft.com/kb/105763
+
+File Times
+http://msdn.microsoft.com/en-us/library/ms724290%28v=vs.85%29.aspx
+
+CreateFile
+http://msdn.microsoft.com/en-us/library/aa363858%28v=vs.85%29.aspx
+
+How To Use NTFS Alternate Data Streams
+http://support.microsoft.com/kb/105763
+
+File Streams
+http://msdn.microsoft.com/en-us/library/aa364404%28v=vs.85%29.aspx
+"""
+
 from __future__ import with_statement
 
 import os
@@ -6,6 +25,8 @@ import struct
 import time
 import zlib
 import operator
+import win32file
+import ctypes
 from collections import namedtuple
 
 try:
@@ -15,7 +36,7 @@ except ImportError:
 
 
 ADS_NAME = u"_M"
-VERSION = "\x02"
+VERSION = "\x03"
 
 
 class StaticBody(tuple):
@@ -38,8 +59,8 @@ class StaticBody(tuple):
 		return (
 			VERSION +
 			"\x00" +
-			struct.pack("d", self.timeMarked) +
-			struct.pack("d", self.mtime) +
+			struct.pack("<d", self.timeMarked) +
+			struct.pack("<Q", self.mtime) +
 			"".join(self.checksums))
 
 
@@ -59,11 +80,11 @@ class VolatileBody(tuple):
 
 
 	def encode(self):
-		return VERSION + "\x01" + struct.pack("d", self.timeMarked)
+		return VERSION + "\x01" + struct.pack("<d", self.timeMarked)
 
 
 
-UNC_PREFIX = "\\\\?\\"
+UNC_PREFIX = u"\\\\?\\"
 
 def absPathToUncPath(p):
 	r"""
@@ -90,9 +111,9 @@ def decodeBody(fh):
 	fh.seek(0)
 	version = ord(fh.read(1))
 	isVolatile = bool(ord(fh.read(1)))
-	timeMarked = struct.unpack("d", fh.read(8))[0]
+	timeMarked = struct.unpack("<d", fh.read(8))[0]
 	if version >= 2:
-		mtime = struct.unpack("d", fh.read(8))[0]
+		mtime = struct.unpack("<Q", fh.read(8))[0]
 	else:
 		mtime = None
 	if not isVolatile:
@@ -127,18 +148,83 @@ def getChecksums(fh):
 	return checksums	
 
 
+class GetTimestampFailed(Exception):
+	pass
+
+
+
+class SetTimestampFailed(Exception):
+	pass
+
+
+
+FILE_SHARE_ALL = (
+	win32file.FILE_SHARE_DELETE |
+	win32file.FILE_SHARE_READ |
+	win32file.FILE_SHARE_WRITE)
+
+def getPreciseModificationTime(fname):
+	"""
+	GetFileTime:
+	http://msdn.microsoft.com/en-us/library/ms724320%28v=vs.85%29.aspx
+	"""
+	if not isinstance(fname, unicode):
+		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
+
+	mtime = ctypes.c_ulonglong(0)
+	h = ctypes.windll.kernel32.CreateFileW(
+		fname, win32file.GENERIC_READ, FILE_SHARE_ALL, 0,
+		win32file.OPEN_EXISTING, win32file.FILE_ATTRIBUTE_NORMAL, 0)
+	if h == win32file.INVALID_HANDLE_VALUE:
+		raise GetTimestampFailed("Couldn't open file %r" % (fname,))
+	try:
+		ret = ctypes.windll.kernel32.GetFileTime(h, 0, 0, ctypes.pointer(mtime))
+		if ret == 0:
+			raise GetTimestampFailed(
+				"Return code 0 from GetFileTime: %r" % (ctypes.GetLastError(),))
+	finally:
+		ctypes.windll.kernel32.CloseHandle(h)
+	return mtime.value
+
+
+def setPreciseModificationTime(fname, mtime):
+	"""
+	SetFileTime:
+	http://msdn.microsoft.com/en-us/library/ms724933%28v=vs.85%29.aspx
+	"""
+	if not isinstance(fname, unicode):
+		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
+
+	mtime = ctypes.c_ulonglong(mtime)
+	h = ctypes.windll.kernel32.CreateFileW(
+		fname, win32file.GENERIC_WRITE, FILE_SHARE_ALL, 0,
+		win32file.OPEN_EXISTING, win32file.FILE_ATTRIBUTE_NORMAL, 0)
+	if h == win32file.INVALID_HANDLE_VALUE:
+		raise SetTimestampFailed("Couldn't open file %r" % (fname,))
+	try:
+		ret = ctypes.windll.kernel32.SetFileTime(h, 0, 0, ctypes.pointer(mtime))
+		if ret == 0:
+			raise SetTimestampFailed(
+				"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
+	finally:
+		ctypes.windll.kernel32.CloseHandle(h)
+
+
 def setChecksums(f):
 	timeMarked = time.time()
 
 	with open(f.path, "rb") as fh:
 		checksums = getChecksums(fh)
-	mtime = f.getModificationTime()
+	mtime = getPreciseModificationTime(f.path)
 	sb = StaticBody(timeMarked, mtime, checksums)
-	# Note: can't use setContent to write an ADS
-	with open(getADSPath(f).path, "wb") as adsW:
-		adsW.write(sb.encode())
-	# Set the mtime back to what it was before the ADS was written
-	os.utime(f.path, (mtime, mtime))
+
+	try:
+		# Note: can't use FilePath.setContent to write an ADS
+		with open(getADSPath(f).path, "wb") as adsW:
+			adsW.write(sb.encode())
+		# Set the mtime back to what it was before the ADS was written.
+	finally:
+		setPreciseModificationTime(f.path, mtime)
 
 
 def verifyOrSetChecksums(f):
@@ -153,8 +239,8 @@ def verifyOrSetChecksums(f):
 		setChecksums(f)
 	else:
 		if isinstance(body, StaticBody):
-			mtime = f.getModificationTime()
-			##print body.mtime, mtime
+			mtime = getPreciseModificationTime(f.path)
+			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
 				print "MODIFIED\t%r" % (f.path,)
 				# Existing checksums are probably obsolete, so just
@@ -179,6 +265,8 @@ def main():
 			for f in root.walk():
 				if f.isfile():
 					verifyOrSetChecksums(f)
+	else:
+		raise ValueError("Unknown command %r" % (command,))
 
 
 if __name__ == '__main__':
