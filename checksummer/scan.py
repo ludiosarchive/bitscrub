@@ -235,9 +235,20 @@ def setChecksums(f):
 		# Note: can't use FilePath.setContent to write an ADS
 		with open(getADSPath(f).path, "wb") as adsW:
 			adsW.write(sb.encode())
-		# Set the mtime back to what it was before the ADS was written.
 	finally:
+		# Set the mtime back to what it was before the ADS was written.
+		# Note that if this program is killed during the write() above,
+		# the mtime will fail to be set back to the original mtime.
 		setPreciseModificationTime(f.path, mtime)
+
+
+def setChecksumsOrPrintMessage(f):
+	try:
+		setChecksums(f)
+	except GetTimestampFailed:
+		print "NOREAD\t%r" % (f.path,)
+	except SetTimestampFailed:
+		print "NOWRITE\t%r" % (f.path,)
 
 
 def verifyOrSetChecksums(f):
@@ -249,16 +260,19 @@ def verifyOrSetChecksums(f):
 
 	if body is None:
 		print "NEW\t%r" % (f.path,)
-		setChecksums(f)
+		setChecksumsOrPrintMessage(f)
 	else:
 		if isinstance(body, StaticBody):
-			mtime = getPreciseModificationTime(f.path)
+			try:
+				mtime = getPreciseModificationTime(f.path)
+			except GetTimestampFailed:
+				print "NOREAD\t%r" % (f.path,)
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
 				print "MODIFIED\t%r" % (f.path,)
 				# Existing checksums are probably obsolete, so just
 				# set new checksums.
-				setChecksums(f)
+				setChecksumsOrPrintMessage(f)
 			else:
 				with open(f.path, "rb") as fh:
 					checksums = getChecksums(fh)
