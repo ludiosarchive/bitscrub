@@ -1,5 +1,6 @@
 from __future__ import with_statement
 
+import os
 import sys
 import struct
 import time
@@ -136,6 +137,8 @@ def setChecksums(f):
 	# Note: can't use setContent to write an ADS
 	with open(getADSPath(f).path, "wb") as adsW:
 		adsW.write(sb.encode())
+	# Set the mtime back to what it was before the ADS was written
+	os.utime(f.path, (mtime, mtime))
 
 
 def verifyOrSetChecksums(f):
@@ -151,7 +154,7 @@ def verifyOrSetChecksums(f):
 	else:
 		if isinstance(body, StaticBody):
 			mtime = f.getModificationTime()
-			print body.mtime, mtime
+			##print body.mtime, mtime
 			if body.mtime != mtime:
 				print "MODIFIED\t%r" % (f.path,)
 				# Existing checksums are probably obsolete, so just
