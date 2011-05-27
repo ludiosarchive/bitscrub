@@ -20,6 +20,7 @@ http://msdn.microsoft.com/en-us/library/aa364404%28v=vs.85%29.aspx
 from __future__ import with_statement
 
 import os
+import stat
 import sys
 import struct
 import time
@@ -231,8 +232,12 @@ def setChecksums(f):
 	mtime = getPreciseModificationTime(f.path)
 	sb = StaticBody(timeMarked, mtime, checksums)
 
+	mode = os.stat(f.path).st_mode
+	wasReadOnly = not mode & stat.S_IWRITE
 	try:
-		# Note: can't use FilePath.setContent to write an ADS
+		if wasReadOnly:
+			# Unset the read-only flag
+			os.chmod(f.path, stat.S_IWRITE)
 		with open(getADSPath(f).path, "wb") as adsW:
 			adsW.write(sb.encode())
 	finally:
@@ -240,6 +245,8 @@ def setChecksums(f):
 		# Note that if this program is killed during the write() above,
 		# the mtime will fail to be set back to the original mtime.
 		setPreciseModificationTime(f.path, mtime)
+		if wasReadOnly:
+			os.chmod(f.path, stat.S_IREAD)
 
 
 def writeToBothOuts(msg):
