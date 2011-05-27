@@ -26,10 +26,12 @@ import struct
 import time
 import zlib
 import operator
-import win32file
+import winnt
 import ctypes
 import hashlib
 from collections import namedtuple
+
+import win32file
 
 try:
 	from twisted.python.filepath import FilePath
@@ -298,17 +300,30 @@ def verifyOrSetChecksums(f):
 					writeToStderr("CHECKED\t%r" % (f.path,))
 
 
+def isReparsePoint(fname):
+	if not isinstance(fname, unicode):
+		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
+
+	attribs = win32file.GetFileAttributesW(fname)
+	return bool(attribs & winnt.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def shouldDescend(f):
+	# Don't descend any reparse points (symlinks are reparse points too).
+	return not isReparsePoint(f.path)
+
+
 def main():
 	command = sys.argv[1]
-	# check files and update ADS for files with no ADS
-	if command == "check":
+	# check files and update ADS for files with no ADS, as well as files with an updated mtime
+	if command == "check+write":
 		rootsBytes = sys.argv[2:]
 		for rootBytes in rootsBytes:
 			# *must* use a unicode path because listdir'ing a `str` extended path
 			# raises WindowsError.
 			root = upgradeFilepath(FilePath(rootBytes.decode("ascii")))
-			for f in root.walk():
-				if f.isfile():
+			for f in root.walk(descend=shouldDescend):
+				if f.isfile() and not isReparsePoint(f.path):
 					verifyOrSetChecksums(f)
 	else:
 		raise ValueError("Unknown command %r" % (command,))
