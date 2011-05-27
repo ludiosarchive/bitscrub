@@ -242,13 +242,18 @@ def setChecksums(f):
 		setPreciseModificationTime(f.path, mtime)
 
 
+def writeToBothOuts(msg):
+	sys.stdout.write(msg + "\n")
+	sys.stderr.write(msg + "\n")
+
+
 def setChecksumsOrPrintMessage(f):
 	try:
 		setChecksums(f)
 	except GetTimestampFailed:
-		print "NOREAD\t%r" % (f.path,)
+		writeToBothOuts("NOREAD\t%r" % (f.path,))
 	except SetTimestampFailed:
-		print "NOWRITE\t%r" % (f.path,)
+		writeToBothOuts("NOWRITE\t%r" % (f.path,))
 
 
 def verifyOrSetChecksums(f):
@@ -266,10 +271,10 @@ def verifyOrSetChecksums(f):
 			try:
 				mtime = getPreciseModificationTime(f.path)
 			except GetTimestampFailed:
-				print "NOREAD\t%r" % (f.path,)
+				writeToBothOuts("NOREAD\t%r" % (f.path,))
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
-				print "MODIFIED\t%r" % (f.path,)
+				writeToBothOuts("MODIFIED\t%r" % (f.path,))
 				# Existing checksums are probably obsolete, so just
 				# set new checksums.
 				setChecksumsOrPrintMessage(f)
@@ -277,7 +282,9 @@ def verifyOrSetChecksums(f):
 				with open(f.path, "rb") as fh:
 					checksums = getChecksums(fh)
 				if checksums != body.checksums:
-					print "CORRUPT\t%r" % (f.path,)
+					writeToBothOuts("CORRUPT\t%r" % (f.path,))
+				else:
+					print "CHECKED\t%r" % (f.path,)
 
 
 def main():
