@@ -14,7 +14,7 @@ except ImportError:
 
 
 ADS_NAME = u"_M"
-VERSION = "\x01"
+VERSION = "\x02"
 
 
 class StaticBody(tuple):
@@ -22,18 +22,24 @@ class StaticBody(tuple):
 	_MARKER = object()
 
 	timeMarked = property(operator.itemgetter(1))
-	checksums = property(operator.itemgetter(2))
+	mtime = property(operator.itemgetter(2))
+	checksums = property(operator.itemgetter(3))
 
-	def __new__(cls, timeMarked, checksums):
-		return tuple.__new__(cls, (cls._MARKER, timeMarked, checksums))
+	def __new__(cls, timeMarked, mtime, checksums):
+		return tuple.__new__(cls, (cls._MARKER, timeMarked, mtime, checksums))
 
 
 	def __repr__(self):
-		return '%s(%r, %r)' % (self.__class__.__name__, self[1], self[2])
+		return '%s(%r, %r, %r)' % (self.__class__.__name__, self[1], self[2], self[3])
 
 
 	def encode(self):
-		return VERSION + "\x00" + struct.pack("d", self.timeMarked) + "".join(self.checksums)
+		return (
+			VERSION +
+			"\x00" +
+			struct.pack("d", self.timeMarked) +
+			struct.pack("d", self.mtime) +
+			"".join(self.checksums))
 
 
 
@@ -81,9 +87,13 @@ def getADSPath(f):
 
 def decodeBody(fh):
 	fh.seek(0)
-	version = fh.read(1)
+	version = ord(fh.read(1))
 	isVolatile = bool(ord(fh.read(1)))
 	timeMarked = struct.unpack("d", fh.read(8))[0]
+	if version >= 2:
+		mtime = struct.unpack("d", fh.read(8))[0]
+	else:
+		mtime = None
 	if not isVolatile:
 		checksums = []
 		while True:
@@ -92,7 +102,7 @@ def decodeBody(fh):
 			if not c:
 				break
 			checksums.append(c)
-		return StaticBody(timeMarked, checksums)
+		return StaticBody(timeMarked, mtime, checksums)
 	else:
 		return VolatileBody(timeMarked)
 
@@ -116,39 +126,56 @@ def getChecksums(fh):
 	return checksums	
 
 
+def setChecksums(f):
+	timeMarked = time.time()
+
+	with open(f.path, "rb") as fh:
+		checksums = getChecksums(fh)
+	mtime = f.getModificationTime()
+	sb = StaticBody(timeMarked, mtime, checksums)
+	# Note: can't use setContent to write an ADS
+	with open(getADSPath(f).path, "wb") as adsW:
+		adsW.write(sb.encode())
+
+
 def verifyOrSetChecksums(f):
-	adsPath = getADSPath(f)
 	try:
-		with open(adsPath.path, "rb") as adsR:
+		with open(getADSPath(f).path, "rb") as adsR:
 			body = decodeBody(adsR)
 	except IOError:
 		body = None
 
 	if body is None:
-		timeMarked = time.time()
-
-		with open(f.path, "rb") as fh:
-			checksums = getChecksums(fh)
-		sb = StaticBody(timeMarked, checksums)
-		print "WRITING\t%r\t%r" % (f.path, len(sb.encode()))
-		# Note: can't use setContent to write an ADS
-		with open(adsPath.path, "wb") as adsW:
-			adsW.write(sb.encode())
+		print "NEW\t%r" % (f.path,)
+		setChecksums(f)
 	else:
 		if isinstance(body, StaticBody):
-			with open(f.path, "rb") as fh:
-				checksums = getChecksums(fh)
-			if checksums != body.checksums:
-				print "MISMATCH\t%r" % (f.path,)
+			mtime = f.getModificationTime()
+			print body.mtime, mtime
+			if body.mtime != mtime:
+				print "MODIFIED\t%r" % (f.path,)
+				# Existing checksums are probably obsolete, so just
+				# set new checksums.
+				setChecksums(f)
+			else:
+				with open(f.path, "rb") as fh:
+					checksums = getChecksums(fh)
+				if checksums != body.checksums:
+					print "CORRUPT\t%r" % (f.path,)
 
 
 def main():
-	# *must* use a unicode path because listdir'ing a `str` extended path
-	# raises WindowsError.
-	root = upgradeFilepath(FilePath(sys.argv[1].decode("ascii")))
-	for f in root.walk():
-		if f.isfile():
-			verifyOrSetChecksums(f)
+	command = sys.argv[1]
+	# check files and update ADS for files with no ADS
+	if command == "check":
+		rootsBytes = sys.argv[2:]
+		for rootBytes in rootsBytes:
+			# *must* use a unicode path because listdir'ing a `str` extended path
+			# raises WindowsError.
+			root = upgradeFilepath(FilePath(rootBytes.decode("ascii")))
+			for f in root.walk():
+				if f.isfile():
+					verifyOrSetChecksums(f)
 
 
 if __name__ == '__main__':
