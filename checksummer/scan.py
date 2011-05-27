@@ -83,7 +83,7 @@ def decodeBody(fh):
 	fh.seek(0)
 	version = fh.read(1)
 	isVolatile = bool(ord(fh.read(1)))
-	timeMarked = struct.unpack("d", fh.read(4))[0]
+	timeMarked = struct.unpack("d", fh.read(8))[0]
 	if not isVolatile:
 		checksums = []
 		while True:
@@ -119,18 +119,27 @@ def getChecksums(fh):
 def verifyOrSetChecksums(f):
 	adsPath = getADSPath(f)
 	try:
-		hashes = adsPath.getContent()
+		with open(adsPath.path, "rb") as adsR:
+			body = decodeBody(adsR)
 	except IOError:
-		hashes = None
+		body = None
 
-	if hashes is None:
+	if body is None:
 		timeMarked = time.time()
 
 		with open(f.path, "rb") as fh:
 			checksums = getChecksums(fh)
 		sb = StaticBody(timeMarked, checksums)
-		print f, repr(len(sb.encode()))
-		##adsPath.setContent(sb.encode())
+		print "WRITING\t%r\t%r" % (f.path, len(sb.encode()))
+		# Note: can't use setContent to write an ADS
+		with open(adsPath.path, "wb") as adsW:
+			adsW.write(sb.encode())
+	else:
+		if isinstance(body, StaticBody):
+			with open(f.path, "rb") as fh:
+				checksums = getChecksums(fh)
+			if checksums != body.checksums:
+				print "MISMATCH\t%r" % (f.path,)
 
 
 def main():
