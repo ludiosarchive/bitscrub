@@ -320,8 +320,18 @@ def isReparsePoint(fname):
 
 
 def shouldDescend(f):
+	# http://twistedmatrix.com/trac/ticket/5123
+	if not f.isdir():
+		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
-	return not isReparsePoint(f.path)
+	if isReparsePoint(f.path):
+		return False
+	try:
+		os.listdir(f.path)
+	except OSError: # A "Permission denied" WindowsError, usually
+		writeToBothOuts("NOLISTDIR\t%r" % (f.path,))
+		return False
+	return True
 
 
 def main():
