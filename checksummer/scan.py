@@ -280,11 +280,17 @@ def setChecksums(f):
 			os.chmod(f.path, stat.S_IREAD)
 
 
-def writeToBothOuts(msg):
+def writeToBothIfVerbose(msg, verbose):
 	sys.stdout.write(msg + "\n")
 	sys.stdout.flush()
-	sys.stderr.write(msg + "\n")
-	sys.stderr.flush()
+	if verbose:
+		sys.stderr.write(msg + "\n")
+		sys.stderr.flush()
+
+
+def writeToStdout(msg):
+	sys.stdout.write(msg + "\n")
+	sys.stdout.flush()
 
 
 def writeToStderr(msg):
@@ -292,13 +298,13 @@ def writeToStderr(msg):
 	sys.stderr.flush()
 
 
-def setChecksumsOrPrintMessage(f):
+def setChecksumsOrPrintMessage(f, verbose):
 	try:
 		setChecksums(f)
 	except GetTimestampFailed:
-		writeToBothOuts("NOREAD\t%r" % (f.path,))
+		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 	except SetTimestampFailed:
-		writeToBothOuts("NOWRITE\t%r" % (f.path,))
+		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
 
 
 def getBody(f):
@@ -322,32 +328,32 @@ def getBody(f):
 def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	body = getBody(f)
 	if inspect:
-		writeToStderr("INSPECT\t%r" % (f.path,))
-		writeToStderr("#\t%s" % (body.getDescription() if body else repr(body),))
+		writeToStdout("INSPECT\t%r" % (f.path,))
+		writeToStdout("#\t%s" % (body.getDescription() if body else repr(body),))
 	if body is None:
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
 		if write:
-			setChecksumsOrPrintMessage(f)
+			setChecksumsOrPrintMessage(f, verbose)
 	else:
 		if isinstance(body, StaticBody):
 			try:
 				mtime = getPreciseModificationTime(f.path)
 			except GetTimestampFailed:
-				writeToBothOuts("NOREAD\t%r" % (f.path,))
+				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
-				writeToBothOuts("MODIFIED\t%r" % (f.path,))
+				writeToBothIfVerbose("MODIFIED\t%r" % (f.path,), verbose)
 				if write:
 					# Existing checksums are probably obsolete, so just
 					# set new checksums.
-					setChecksumsOrPrintMessage(f)
+					setChecksumsOrPrintMessage(f, verbose)
 			else:
 				if verify:
 					with open(f.path, "rb") as fh:
 						checksums = getChecksums(fh)
 					if checksums != body.checksums:
-						writeToBothOuts("CORRUPT\t%r" % (f.path,))
+						writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
 					else:
 						if verbose:
 							writeToStderr("VERIFIED\t%r" % (f.path,))
@@ -395,7 +401,7 @@ def main():
 	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
-		default=True, help="don't print unimportant messages (to stderr)")
+		default=True, help="don't print important and unimportant messages to stderr")
 
 	args = parser.parse_args()
 
