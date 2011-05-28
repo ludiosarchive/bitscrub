@@ -283,6 +283,8 @@ def setChecksums(f, verbose):
 		# Note that if this program is killed during the write() above,
 		# the mtime and read-only flags may remain incorrect.
 		setPreciseModificationTime(getADSPath(f).path, mtime)
+		# TODO: perhaps print something other than "NOWRITE" if the
+		# above fails.
 		if wasReadOnly:
 			os.chmod(f.path, stat.S_IREAD)
 
