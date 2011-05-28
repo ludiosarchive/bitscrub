@@ -48,14 +48,6 @@ ADS_NAME = u"_M"
 VERSION = "\x07"
 
 
-def getUnixTime(t):
-	# 89 = number of leap year days between 1601 and 1970
-	# http://src.chromium.org/svn/trunk/src/base/time_win.cc
-	offset = ((1970-1601)*365+89)*24*60*60*1000*1000*10
-	x = t - offset
-	return x / float(1000*1000*10)
-
-
 class StaticBody(tuple):
 	__slots__ = ()
 	_MARKER = object()
@@ -74,10 +66,11 @@ class StaticBody(tuple):
 
 	def getDescription(self):
 		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
-		mtimeStr = datetime.datetime.utcfromtimestamp(getUnixTime(self.mtime))
+		mtimeDate = (datetime.datetime(1601, 1, 1) +
+			datetime.timedelta(microseconds=self.mtime / 10))
 		checksumsHex = list(s.encode("hex") for s in self.checksums)
 		return "<StaticBody marked at %s when mtime was %s; checksums=%r>" % (
-			markedStr, mtimeStr, checksumsHex)
+			markedStr, mtimeDate.isoformat(), checksumsHex)
 
 
 	def encode(self):
