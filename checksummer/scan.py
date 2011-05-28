@@ -268,9 +268,14 @@ def setChecksums(f):
 			adsW.write(sb.encode())
 	finally:
 		# Set the mtime back to what it was before the ADS was written.
+		# We set the mtime on the ADS instead of the file because it
+		# might be impossible to open the file with GENERIC_WRITE access
+		# if some program has the file open.  Note that timestamps are
+		# per-file, not per-stream.
+		#
 		# Note that if this program is killed during the write() above,
-		# the mtime will fail to be set back to the original mtime.
-		setPreciseModificationTime(f.path, mtime)
+		# the mtime and read-only flags may remain incorrect.
+		setPreciseModificationTime(getADSPath(f).path, mtime)
 		if wasReadOnly:
 			os.chmod(f.path, stat.S_IREAD)
 
