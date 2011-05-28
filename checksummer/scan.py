@@ -250,11 +250,18 @@ def setPreciseModificationTime(fname, mtime):
 		ctypes.windll.kernel32.CloseHandle(h)
 
 
-def setChecksums(f):
+def setChecksums(f, verbose):
 	timeMarked = time.time()
 
-	with open(f.path, "rb") as fh:
+	try:
+		fh = open(f.path, "rb")
+	except IOError:
+		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		return
+	try:
 		checksums = getChecksums(fh)
+	finally:
+		fh.close()
 	mtime = getPreciseModificationTime(f.path)
 	sb = StaticBody(timeMarked, mtime, checksums)
 
@@ -300,7 +307,7 @@ def writeToStderr(msg):
 
 def setChecksumsOrPrintMessage(f, verbose):
 	try:
-		setChecksums(f)
+		setChecksums(f, verbose)
 	except GetTimestampFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 	except SetTimestampFailed:
