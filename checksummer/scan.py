@@ -1,5 +1,9 @@
 """
-Some useful documentation:
+Checksummer reads and/or writes checksums of files in the files' ADS
+(alternate data stream).  Works only on NTFS partitions.
+
+
+Some useful documentation for developers:
 
 How To Use NTFS Alternate Data Streams
 http://support.microsoft.com/kb/105763
