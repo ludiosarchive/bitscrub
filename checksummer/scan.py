@@ -24,6 +24,7 @@ import stat
 import sys
 import struct
 import time
+import datetime
 import operator
 import argparse
 import winnt
@@ -43,6 +44,14 @@ ADS_NAME = u"_M"
 VERSION = "\x07"
 
 
+def getUnixTime(t):
+	# 89 = number of leap year days between 1601 and 1970
+	# http://src.chromium.org/svn/trunk/src/base/time_win.cc
+	offset = ((1970-1601)*365+89)*24*60*60*1000*1000*10
+	x = t - offset
+	return x / float(1000*1000*10)
+
+
 class StaticBody(tuple):
 	__slots__ = ()
 	_MARKER = object()
@@ -57,6 +66,14 @@ class StaticBody(tuple):
 
 	def __repr__(self):
 		return '%s(%r, %r, %r)' % (self.__class__.__name__, self[1], self[2], self[3])
+
+
+	def getDescription(self):
+		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
+		mtimeStr = datetime.datetime.utcfromtimestamp(getUnixTime(self.mtime))
+		checksumsHex = list(s.encode("hex") for s in self.checksums)
+		return "<StaticBody marked at %s when mtime was %s; checksums=%r>" % (
+			markedStr, mtimeStr, checksumsHex)
 
 
 	def encode(self):
@@ -81,6 +98,11 @@ class VolatileBody(tuple):
 
 	def __repr__(self):
 		return '%s(%r)' % (self.__class__.__name__, self[1])
+
+
+	def getDescription(self):
+		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
+		return "<VolatileBody marked at %s>" % (markedStr,)
 
 
 	def encode(self):
@@ -296,7 +318,7 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	body = getBody(f)
 	if inspect:
 		writeToStderr("INSPECT\t%r" % (f.path,))
-		writeToStderr("#\t%r" % (body,))
+		writeToStderr("#\t%s" % (body.getDescription(),))
 	if body is None:
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
