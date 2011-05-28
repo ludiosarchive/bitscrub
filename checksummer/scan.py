@@ -25,6 +25,7 @@ import sys
 import struct
 import time
 import operator
+import argparse
 import winnt
 import ctypes
 import hashlib
@@ -285,11 +286,22 @@ def getBody(f):
 	return body
 
 
-def verifyOrSetChecksums(f):
+# Four possibilities here:
+# verify=False, write=False -> just recurse and print NEW/NOREAD/MODIFIED
+# verify=True, write=False -> verify checksums for non-modified files
+# verify=True, write=True -> verify and write new checksums where needed
+# verify=False, write=True -> ignore existing checksums, write new checksums where needed
+
+def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	body = getBody(f)
+	if inspect:
+		writeToStderr("INSPECT\t%r" % (f.path,))
+		writeToStderr("#\t%r" % (body,))
 	if body is None:
-		writeToStderr("NEW\t%r" % (f.path,))
-		setChecksumsOrPrintMessage(f)
+		if verbose:
+			writeToStderr("NEW\t%r" % (f.path,))
+		if write:
+			setChecksumsOrPrintMessage(f)
 	else:
 		if isinstance(body, StaticBody):
 			try:
@@ -299,16 +311,19 @@ def verifyOrSetChecksums(f):
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
 				writeToBothOuts("MODIFIED\t%r" % (f.path,))
-				# Existing checksums are probably obsolete, so just
-				# set new checksums.
-				setChecksumsOrPrintMessage(f)
+				if write:
+					# Existing checksums are probably obsolete, so just
+					# set new checksums.
+					setChecksumsOrPrintMessage(f)
 			else:
-				with open(f.path, "rb") as fh:
-					checksums = getChecksums(fh)
-				if checksums != body.checksums:
-					writeToBothOuts("CORRUPT\t%r" % (f.path,))
-				else:
-					writeToStderr("CHECKED\t%r" % (f.path,))
+				if verify:
+					with open(f.path, "rb") as fh:
+						checksums = getChecksums(fh)
+					if checksums != body.checksums:
+						writeToBothOuts("CORRUPT\t%r" % (f.path,))
+					else:
+						if verbose:
+							writeToStderr("VERIFIED\t%r" % (f.path,))
 
 
 def isReparsePoint(fname):
@@ -335,25 +350,42 @@ def shouldDescend(f):
 
 
 def main():
-	command = sys.argv[1]
-	# check files and update ADS for files with no ADS, as well as files with an updated mtime
-	if command == "check+write":
-		rootsBytes = sys.argv[2:]
-		for rootBytes in rootsBytes:
-			# *must* use a unicode path because listdir'ing a `str` extended path
-			# raises WindowsError.
-			root = upgradeFilepath(FilePath(rootBytes.decode("ascii")))
-			for f in root.walk(descend=shouldDescend):
+	parser = argparse.ArgumentParser(description="""
+	Reads and/or writes checksums of files in the files' ADS (alternate data stream).
+	Works only on NTFS partitions.
+
+	--verify, --write, and --inspect can be combined.  If none of these are
+	specified, files will be checked only for lack of checksum data or updated mtime.
+	""")
+
+	parser.add_argument('path', metavar='PATH', type=str, nargs='+',
+		help="a file or directory")
+	parser.add_argument('-v', '--verify', dest='verify', action='store_true',
+		help="verify already-stored checksums to detect file corruption")
+	parser.add_argument('-w', '--write', dest='write', action='store_true',
+		help="calculate and write checksums for files that "
+			"have no checksum, or have an updated mtime")
+	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
+		help="print information about existing checksum data")
+	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
+		default=True, help="don't print unimportant messages (to stderr)")
+
+	args = parser.parse_args()
+
+	for fname in args.path:
+		# *must* use a unicode path because listdir'ing a `str` extended path
+		# raises WindowsError.
+		p = upgradeFilepath(FilePath(fname.decode("ascii")))
+		if p.isdir():
+			for f in p.walk(descend=shouldDescend):
 				if f.isfile() and not isReparsePoint(f.path):
-					verifyOrSetChecksums(f)
-	elif command == "inspect":
-		fname = sys.argv[2]
-		f = upgradeFilepath(FilePath(fname.decode("ascii")))
-		body = getBody(f)
-		print "body for %r:" % (f.path,)
-		print repr(body)
-	else:
-		raise ValueError("Unknown command %r" % (command,))
+					verifyOrSetChecksums(f, verify=args.verify, write=args.write,
+						inspect=args.inspect, verbose=args.verbose)
+		else:
+			f = p
+			if f.isfile() and not isReparsePoint(f.path):
+				verifyOrSetChecksums(f, verify=args.verify, write=args.write,
+					inspect=args.inspect, verbose=args.verbose)
 
 
 if __name__ == '__main__':
