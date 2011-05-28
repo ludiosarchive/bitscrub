@@ -24,7 +24,6 @@ import stat
 import sys
 import struct
 import time
-import zlib
 import operator
 import winnt
 import ctypes
@@ -40,7 +39,7 @@ except ImportError:
 
 
 ADS_NAME = u"_M"
-VERSION = "\x04"
+VERSION = "\x07"
 
 
 class StaticBody(tuple):
@@ -59,20 +58,13 @@ class StaticBody(tuple):
 		return '%s(%r, %r, %r)' % (self.__class__.__name__, self[1], self[2], self[3])
 
 
-	def getChecksumsDigest(self):
-		return hashlib.sha1("".join(self.checksums)).digest()
-
-
 	def encode(self):
-		joinedChecksums = "".join(self.checksums)
-		checksumsDigest = hashlib.sha1(joinedChecksums).digest()
 		return (
 			VERSION +
 			"\x00" +
 			struct.pack("<d", self.timeMarked) +
 			struct.pack("<Q", self.mtime) +
-			checksumsDigest +
-			joinedChecksums)
+			"".join(self.checksums))
 
 
 
@@ -118,25 +110,24 @@ def getADSPath(f):
 	return FilePath(f.path + u":" + ADS_NAME)
 
 
+class UnreadableOldVersion(Exception):
+	pass
+
+
+
 def decodeBody(fh):
 	fh.seek(0)
 	version = ord(fh.read(1))
+	if version < 7:
+		raise UnreadableOldVersion("Can't read version %r" % (version,))
 	isVolatile = bool(ord(fh.read(1)))
 	timeMarked = struct.unpack("<d", fh.read(8))[0]
-	if version >= 2:
-		mtime = struct.unpack("<Q", fh.read(8))[0]
-	else:
-		mtime = None
-	if version >= 4:
-		checksumsDigest = fh.read(160/8)
-	else:
-		checksumsDigest = "\x00" * (160/8)
-	# Note: checksumsDigest isn't validated anywhere yet
+	mtime = struct.unpack("<Q", fh.read(8))[0]
 	if not isVolatile:
 		checksums = []
 		while True:
-			c = fh.read(4)
-			assert len(c) in (0, 4), "Got %d bytes instead of expected 0 or 4: %r" % (len(c), c)
+			c = fh.read(8)
+			assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
 			if not c:
 				break
 			checksums.append(c)
@@ -145,23 +136,33 @@ def decodeBody(fh):
 		return VolatileBody(timeMarked)
 
 
-def crc32Bytes(s):
-	return struct.pack("i", zlib.crc32(s))
+def _getChecksums(fh, readSize, blockSize):
+	"""
+	Yields an 8-byte hash for every `blockSize` bytes in `fh`.
+	Doesn't yield anything for an empty file.  Yields one hash for
+	a `blockSize`-sized file.
+	"""
+	if blockSize % readSize != 0:
+		raise ValueError("blockSize must be divisible by readSize; "
+			"arguments were readSize=%r, blockSize=%r)" % (readSize, blockSize))
+
+	fh.seek(0)
+	m = hashlib.md5()
+	while True:
+		data = fh.read(readSize)
+		if not data:
+			break
+		m.update(data)
+		if len(data) < readSize:
+			yield m.digest()[:8]
+			break
+		elif fh.tell() % blockSize == 0:
+			yield m.digest()[:8]
+			m = hashlib.md5()
 
 
 def getChecksums(fh):
-	checksums = []
-
-	fh.seek(0)
-	while True:
-		# Checksum every 4KB block, regardless of underlying filesystem
-		# block size.
-		bytes = fh.read(4096)
-		if not bytes:
-			break
-		checksums.append(crc32Bytes(bytes))
-
-	return checksums	
+	return list(_getChecksums(fh, readSize=1*1024*1024, blockSize=32*1024*1024))
 
 
 class GetTimestampFailed(Exception):
@@ -253,11 +254,14 @@ def setChecksums(f):
 
 def writeToBothOuts(msg):
 	sys.stdout.write(msg + "\n")
+	sys.stdout.flush()
 	sys.stderr.write(msg + "\n")
+	sys.stderr.flush()
 
 
 def writeToStderr(msg):
 	sys.stderr.write(msg + "\n")
+	sys.stderr.flush()
 
 
 def setChecksumsOrPrintMessage(f):
@@ -269,13 +273,20 @@ def setChecksumsOrPrintMessage(f):
 		writeToBothOuts("NOWRITE\t%r" % (f.path,))
 
 
-def verifyOrSetChecksums(f):
+def getBody(f):
 	try:
 		with open(getADSPath(f).path, "rb") as adsR:
-			body = decodeBody(adsR)
+			try:
+				body = decodeBody(adsR)
+			except UnreadableOldVersion:
+				body = None
 	except IOError:
 		body = None
+	return body
 
+
+def verifyOrSetChecksums(f):
+	body = getBody(f)
 	if body is None:
 		writeToStderr("NEW\t%r" % (f.path,))
 		setChecksumsOrPrintMessage(f)
@@ -325,6 +336,12 @@ def main():
 			for f in root.walk(descend=shouldDescend):
 				if f.isfile() and not isReparsePoint(f.path):
 					verifyOrSetChecksums(f)
+	elif command == "inspect":
+		fname = sys.argv[2]
+		f = upgradeFilepath(FilePath(fname.decode("ascii")))
+		body = getBody(f)
+		print "body for %r:" % (f.path,)
+		print repr(body)
 	else:
 		raise ValueError("Unknown command %r" % (command,))
 
