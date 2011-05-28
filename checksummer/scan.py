@@ -323,7 +323,7 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	body = getBody(f)
 	if inspect:
 		writeToStderr("INSPECT\t%r" % (f.path,))
-		writeToStderr("#\t%s" % (body.getDescription(),))
+		writeToStderr("#\t%s" % (body.getDescription() if body else repr(body),))
 	if body is None:
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
