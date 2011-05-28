@@ -39,6 +39,11 @@ from collections import namedtuple
 import win32file
 
 try:
+	import simplejson as json
+except ImportError:
+	import json
+
+try:
 	from twisted.python.filepath import FilePath
 except ImportError:
 	from filepath import FilePath
@@ -377,6 +382,9 @@ def shouldDescend(f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
 		return False
+	excludes = getExcludesForDirectory(f.parent())
+	if f.basename() in excludes:
+		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
 	if isReparsePoint(f.path):
 		return False
@@ -386,6 +394,42 @@ def shouldDescend(f):
 		writeToBothOuts("NOLISTDIR\t%r" % (f.path,))
 		return False
 	return True
+
+
+def handlePath(f, verify, write, inspect, verbose):
+	if f.isfile() and not isReparsePoint(f.path):
+		verifyOrSetChecksums(f, verify, write, inspect, verbose)
+
+
+def getContentIfExists(f, maxRead):
+	try:
+		fh = open(f.path, "rb")
+	except IOError:
+		return None
+	try:
+		return fh.read(maxRead)
+		# Above might raise exception if .read() fails for some reason
+	finally:
+		fh.close()
+
+
+_lastExcludes = [None, None]
+
+def getExcludesForDirectory(p):
+	if p == _lastExcludes[0]:
+		return _lastExcludes[1]
+
+	bytes = getContentIfExists(p.child(".checksummer.json"), 2**16)
+	if bytes is None:
+		config = {}
+	else:
+		config = json.loads(bytes)
+		# Above might raise exception if JSON is invalid
+	excludes = set(config.get("excludes", []))
+
+	_lastExcludes[:] = [p, excludes]
+
+	return excludes
 
 
 def main():
@@ -410,6 +454,8 @@ def main():
 		default=True, help="don't print important and unimportant messages to stderr")
 
 	args = parser.parse_args()
+	kwargs = dict(verify=args.verify, write=args.write,
+		inspect=args.inspect, verbose=args.verbose)
 
 	for fname in args.path:
 		# *must* use a unicode path because listdir'ing a `str` extended path
@@ -417,14 +463,14 @@ def main():
 		p = upgradeFilepath(FilePath(fname.decode("ascii")))
 		if p.isdir():
 			for f in p.walk(descend=shouldDescend):
-				if f.isfile() and not isReparsePoint(f.path):
-					verifyOrSetChecksums(f, verify=args.verify, write=args.write,
-						inspect=args.inspect, verbose=args.verbose)
+				excludes = getExcludesForDirectory(f.parent())
+				if f.basename() not in excludes:
+					handlePath(f, **kwargs)
 		else:
 			f = p
-			if f.isfile() and not isReparsePoint(f.path):
-				verifyOrSetChecksums(f, verify=args.verify, write=args.write,
-					inspect=args.inspect, verbose=args.verbose)
+			excludes = getExcludesForDirectory(f.parent())
+			if f.basename() not in excludes:
+				handlePath(f, **kwargs)
 
 
 if __name__ == '__main__':
