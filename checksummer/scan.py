@@ -382,7 +382,7 @@ def shouldDescend(f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
 		return False
-	excludes = getExcludesForDirectory(f.parent())
+	excludes = getExcludesForDirectory(parentEx(f))
 	if f.basename() in excludes:
 		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
@@ -432,6 +432,23 @@ def getExcludesForDirectory(p):
 	return excludes
 
 
+def isDrive(f):
+	return f.path.endswith(u":\\")
+
+
+def parentEx(f):
+	"""
+	A version of FilePath.parent that works correctly with extended paths.
+	"""
+	if isDrive(f):
+		return f
+	parent = f.parent()
+	# f.parent() of \\?\C:\dir is \\?\C: , so fix it:
+	if parent.path.endswith(u":"):
+		return FilePath(parent.path + u"\\")
+	return parent
+
+
 def main():
 	parser = argparse.ArgumentParser(description="""
 	Reads and/or writes checksums of files in the files' ADS (alternate data stream).
@@ -463,12 +480,12 @@ def main():
 		p = upgradeFilepath(FilePath(fname.decode("ascii")))
 		if p.isdir():
 			for f in p.walk(descend=shouldDescend):
-				excludes = getExcludesForDirectory(f.parent())
+				excludes = getExcludesForDirectory(parentEx(f))
 				if f.basename() not in excludes:
 					handlePath(f, **kwargs)
 		else:
 			f = p
-			excludes = getExcludesForDirectory(f.parent())
+			excludes = getExcludesForDirectory(parentEx(f))
 			if f.basename() not in excludes:
 				handlePath(f, **kwargs)
 
