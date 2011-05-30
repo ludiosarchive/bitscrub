@@ -3,6 +3,12 @@ Checksummer reads and/or writes checksums of files in the files' ADS
 (alternate data stream).  Works only on NTFS partitions.
 
 
+TODO:
+
+*	Support passing in a "file exclude function"; function is called for every
+	file; if return value is True, do scan the file.
+
+
 Some useful documentation for developers:
 
 How To Use NTFS Alternate Data Streams
