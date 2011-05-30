@@ -369,7 +369,7 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	else:
 		if isinstance(body, StaticBody):
 			try:
-				mtime = getPreciseModificationTime(f.path)
+				mtime = getPreciseModificationTime(getADSPath(f).path)
 			except GetTimestampFailed:
 				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 				return
