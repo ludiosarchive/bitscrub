@@ -56,7 +56,7 @@ except ImportError:
 
 
 ADS_NAME = u"_M"
-VERSION = "\x07"
+VERSION = chr(8)
 
 
 class StaticBody(tuple):
@@ -151,6 +151,14 @@ def decodeBody(fh):
 	version = ord(fh.read(1))
 	if version < 7:
 		raise UnreadableOldVersion("Can't read version %r" % (version,))
+	if version == 7:
+		# Version 7 had a bug that omitted a checksum for some files.
+		fh.seek(0, 2) # seek to the end
+		fileLength = fh.tell()
+		fh.seek(1) # seek back
+		if fileLength % (1*1024*1024) == 0:
+			raise UnreadableOldVersion("Can't read version %r for files "
+				"whose length is a multiple of 1024*1024" % (version,))
 	isVolatile = bool(ord(fh.read(1)))
 	timeMarked = struct.unpack("<d", fh.read(8))[0]
 	mtime = struct.unpack("<Q", fh.read(8))[0]
@@ -179,9 +187,12 @@ def _getChecksums(fh, readSize, blockSize):
 
 	fh.seek(0)
 	m = hashlib.md5()
+	blockInProgress = False
 	while True:
 		data = fh.read(readSize)
 		if not data:
+			if blockInProgress:
+				yield m.digest()[:8]
 			break
 		m.update(data)
 		if len(data) < readSize:
@@ -190,6 +201,9 @@ def _getChecksums(fh, readSize, blockSize):
 		elif fh.tell() % blockSize == 0:
 			yield m.digest()[:8]
 			m = hashlib.md5()
+			blockInProgress = False
+		else:
+			blockInProgress = True
 
 
 def getChecksums(fh):
