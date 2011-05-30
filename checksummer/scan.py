@@ -372,6 +372,7 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 				mtime = getPreciseModificationTime(f.path)
 			except GetTimestampFailed:
 				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+				return
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
 				writeToBothIfVerbose("MODIFIED\t%r" % (f.path,), verbose)
