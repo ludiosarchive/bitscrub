@@ -85,10 +85,27 @@ def read(h, length):
 	if not ret:
 		raise ReadFailed("Couldn't read from handle %r (%d bytes)" % (h, length))
 
-	read = sbuf.value
-	if read is None:
+	read = sbuf.raw
+	if bytesRead.value == 0:
 		read = ''
 	return read
+
+
+class GetLengthFailed(Exception):
+	pass
+
+
+
+def getFileSize(h):
+	length = ctypes.c_long(0)
+	ret = ctypes.windll.kernel32.GetFileSizeEx(
+		ctypes.c_long(h),
+		ctypes.byref(length))
+
+	if not ret:
+		raise ReadFailed("Couldn't get length of handle %r" % (h,))
+
+	return length.value
 
 
 class WriteFailed(Exception):

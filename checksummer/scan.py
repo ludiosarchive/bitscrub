@@ -52,7 +52,7 @@ try:
 except ImportError:
 	from filepath import FilePath
 
-from checksummer.winfile import upgradeFilepath, parentEx, isReparsePoint
+import checksummer.winfile as winfile
 
 
 ADS_NAME = u"_M"
@@ -127,26 +127,27 @@ class UnreadableOldVersion(Exception):
 
 
 
-def decodeBody(fh):
-	fh.seek(0)
-	version = ord(fh.read(1))
+def decodeBody(h):
+	winfile.seek(h, 0)
+	version = ord(winfile.read(h, 1))
 	if version < 7:
 		raise UnreadableOldVersion("Can't read version %r" % (version,))
 	if version == 7:
 		# Version 7 had a bug that omitted a checksum for some files.
-		fh.seek(0, 2) # seek to the end
-		fileLength = fh.tell()
-		fh.seek(1) # seek back
-		if fileLength % (1*1024*1024) == 0:
+		if winfile.getFileSize(h) % (1024*1024) == 0:
 			raise UnreadableOldVersion("Can't read version %r for files "
 				"whose length is a multiple of 1024*1024" % (version,))
-	isVolatile = bool(ord(fh.read(1)))
-	timeMarked = struct.unpack("<d", fh.read(8))[0]
-	mtime = struct.unpack("<Q", fh.read(8))[0]
+	volatileStr = winfile.read(h, 1)
+	if not volatileStr:
+		# TODO: new exception
+		raise UnreadableOldVersion("Truncated ADS?")
+	isVolatile = bool(ord(volatileStr))
+	timeMarked = struct.unpack("<d", winfile.read(h, 8))[0]
+	mtime = struct.unpack("<Q", winfile.read(h, 8))[0]
 	if not isVolatile:
 		checksums = []
 		while True:
-			c = fh.read(8)
+			c = winfile.read(h, 8)
 			assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
 			if not c:
 				break
@@ -188,7 +189,7 @@ def _getChecksums(fh, readSize, blockSize):
 
 
 def getChecksums(fh):
-	return list(_getChecksums(fh, readSize=1*1024*1024, blockSize=32*1024*1024))
+	return list(_getChecksums(fh, readSize=1024*1024, blockSize=32*1024*1024))
 
 
 class GetTimestampFailed(Exception):
@@ -321,12 +322,14 @@ def setChecksumsOrPrintMessage(f, verbose):
 
 def getBody(f):
 	try:
-		with open(getADSPath(f).path, "rb") as adsR:
-			try:
-				body = decodeBody(adsR)
-			except UnreadableOldVersion:
-				body = None
-	except IOError:
+		h = winfile.open(getADSPath(f).path, reading=True, writing=False)
+		try:
+			body = decodeBody(h)
+		except UnreadableOldVersion:
+			body = None
+		finally:
+			winfile.close(h)
+	except winfile.OpenFailed:
 		body = None
 	return body
 
@@ -378,11 +381,11 @@ def shouldDescend(f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
 		return False
-	excludes = getExcludesForDirectory(parentEx(f))
+	excludes = getExcludesForDirectory(winfile.parentEx(f))
 	if f.basename() in excludes:
 		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
-	if isReparsePoint(f.path):
+	if winfile.isReparsePoint(f.path):
 		return False
 	try:
 		os.listdir(f.path)
@@ -393,7 +396,7 @@ def shouldDescend(f):
 
 
 def handlePath(f, verify, write, inspect, verbose):
-	if f.isfile() and not isReparsePoint(f.path):
+	if f.isfile() and not winfile.isReparsePoint(f.path):
 		verifyOrSetChecksums(f, verify, write, inspect, verbose)
 
 
@@ -456,15 +459,15 @@ def main():
 	for fname in args.path:
 		# *must* use a unicode path because listdir'ing a `str` extended path
 		# raises WindowsError.
-		p = upgradeFilepath(FilePath(fname.decode("ascii")))
+		p = winfile.upgradeFilepath(FilePath(fname.decode("ascii")))
 		if p.isdir():
 			for f in p.walk(descend=shouldDescend):
-				excludes = getExcludesForDirectory(parentEx(f))
+				excludes = getExcludesForDirectory(winfile.parentEx(f))
 				if f.basename() not in excludes:
 					handlePath(f, **kwargs)
 		else:
 			f = p
-			excludes = getExcludesForDirectory(parentEx(f))
+			excludes = getExcludesForDirectory(winfile.parentEx(f))
 			if f.basename() not in excludes:
 				handlePath(f, **kwargs)
 
