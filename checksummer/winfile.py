@@ -1,5 +1,6 @@
 import ctypes
 import win32file
+import winnt
 
 try:
 	from twisted.python.filepath import FilePath
@@ -156,3 +157,28 @@ def setModificationTimeNanoseconds(h, ns):
 	if ret == 0:
 		raise SetMetadataFailed(
 			"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
+
+
+def isReparsePoint(fname):
+	if not isinstance(fname, unicode):
+		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
+
+	attribs = win32file.GetFileAttributesW(fname)
+	return bool(attribs & winnt.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def isDrive(f):
+	return f.path.endswith(u":\\")
+
+
+def parentEx(f):
+	"""
+	A version of FilePath.parent that works correctly with extended paths.
+	"""
+	if isDrive(f):
+		return f
+	parent = f.parent()
+	# f.parent() of \\?\C:\dir is \\?\C: , so fix it:
+	if parent.path.endswith(u":"):
+		return FilePath(parent.path + u"\\")
+	return parent

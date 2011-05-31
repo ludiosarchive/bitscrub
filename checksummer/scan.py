@@ -37,7 +37,6 @@ import time
 import datetime
 import operator
 import argparse
-import winnt
 import ctypes
 import hashlib
 
@@ -53,7 +52,7 @@ try:
 except ImportError:
 	from filepath import FilePath
 
-from checksummer.winfile import upgradeFilepath
+from checksummer.winfile import upgradeFilepath, parentEx, isReparsePoint
 
 
 ADS_NAME = u"_M"
@@ -375,14 +374,6 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 							writeToStderr("VERIFIED\t%r" % (f.path,))
 
 
-def isReparsePoint(fname):
-	if not isinstance(fname, unicode):
-		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
-
-	attribs = win32file.GetFileAttributesW(fname)
-	return bool(attribs & winnt.FILE_ATTRIBUTE_REPARSE_POINT)
-
-
 def shouldDescend(f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
@@ -435,23 +426,6 @@ def getExcludesForDirectory(p):
 	_lastExcludes[:] = [p, excludes]
 
 	return excludes
-
-
-def isDrive(f):
-	return f.path.endswith(u":\\")
-
-
-def parentEx(f):
-	"""
-	A version of FilePath.parent that works correctly with extended paths.
-	"""
-	if isDrive(f):
-		return f
-	parent = f.parent()
-	# f.parent() of \\?\C:\dir is \\?\C: , so fix it:
-	if parent.path.endswith(u":"):
-		return FilePath(parent.path + u"\\")
-	return parent
 
 
 def main():
