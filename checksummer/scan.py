@@ -37,7 +37,6 @@ import time
 import datetime
 import operator
 import argparse
-import ctypes
 import hashlib
 
 import win32file
@@ -157,9 +156,9 @@ def decodeBody(h):
 		return VolatileBody(timeMarked)
 
 
-def _getChecksums(fh, readSize, blockSize):
+def _getChecksums(h, readSize, blockSize):
 	"""
-	Yields an 8-byte hash for every `blockSize` bytes in `fh`.
+	Yields an 8-byte hash for every `blockSize` bytes in `h`.
 	Doesn't yield anything for an empty file.  Yields one hash for
 	a `blockSize`-sized file.
 	"""
@@ -167,11 +166,13 @@ def _getChecksums(fh, readSize, blockSize):
 		raise ValueError("blockSize must be divisible by readSize; "
 			"arguments were readSize=%r, blockSize=%r)" % (readSize, blockSize))
 
-	fh.seek(0)
+	winfile.seek(h, 0)
+	pos = 0
 	m = hashlib.md5()
 	blockInProgress = False
 	while True:
-		data = fh.read(readSize)
+		data = winfile.read(h, readSize)
+		pos += len(data)
 		if not data:
 			if blockInProgress:
 				yield m.digest()[:8]
@@ -180,7 +181,7 @@ def _getChecksums(fh, readSize, blockSize):
 		if len(data) < readSize:
 			yield m.digest()[:8]
 			break
-		elif fh.tell() % blockSize == 0:
+		elif pos % blockSize == 0:
 			yield m.digest()[:8]
 			m = hashlib.md5()
 			blockInProgress = False
@@ -188,95 +189,34 @@ def _getChecksums(fh, readSize, blockSize):
 			blockInProgress = True
 
 
-def getChecksums(fh):
-	return list(_getChecksums(fh, readSize=1024*1024, blockSize=32*1024*1024))
-
-
-class GetTimestampFailed(Exception):
-	pass
-
-
-
-class SetTimestampFailed(Exception):
-	pass
-
-
-
-FILE_SHARE_ALL = (
-	win32file.FILE_SHARE_DELETE |
-	win32file.FILE_SHARE_READ |
-	win32file.FILE_SHARE_WRITE)
-
-def getPreciseModificationTime(fname):
-	"""
-	GetFileTime:
-	http://msdn.microsoft.com/en-us/library/ms724320%28v=vs.85%29.aspx
-	"""
-	if not isinstance(fname, unicode):
-		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
-
-	mtime = ctypes.c_ulonglong(0)
-	h = ctypes.windll.kernel32.CreateFileW(
-		fname, win32file.GENERIC_READ, FILE_SHARE_ALL, 0,
-		win32file.OPEN_EXISTING, win32file.FILE_ATTRIBUTE_NORMAL, 0)
-	if h == win32file.INVALID_HANDLE_VALUE:
-		raise GetTimestampFailed("Couldn't open file %r" % (fname,))
-	try:
-		ret = ctypes.windll.kernel32.GetFileTime(h, 0, 0, ctypes.pointer(mtime))
-		if ret == 0:
-			raise GetTimestampFailed(
-				"Return code 0 from GetFileTime: %r" % (ctypes.GetLastError(),))
-	finally:
-		ctypes.windll.kernel32.CloseHandle(h)
-	return mtime.value
-
-
-def setPreciseModificationTime(fname, mtime):
-	"""
-	SetFileTime:
-	http://msdn.microsoft.com/en-us/library/ms724933%28v=vs.85%29.aspx
-	"""
-	if not isinstance(fname, unicode):
-		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
-
-	mtime = ctypes.c_ulonglong(mtime)
-	h = ctypes.windll.kernel32.CreateFileW(
-		fname, win32file.GENERIC_WRITE, FILE_SHARE_ALL, 0,
-		win32file.OPEN_EXISTING, win32file.FILE_ATTRIBUTE_NORMAL, 0)
-	if h == win32file.INVALID_HANDLE_VALUE:
-		raise SetTimestampFailed("Couldn't open file %r" % (fname,))
-	try:
-		ret = ctypes.windll.kernel32.SetFileTime(h, 0, 0, ctypes.pointer(mtime))
-		if ret == 0:
-			raise SetTimestampFailed(
-				"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
-	finally:
-		ctypes.windll.kernel32.CloseHandle(h)
+def getChecksums(h):
+	return list(_getChecksums(h, readSize=1024*1024, blockSize=32*1024*1024))
 
 
 def setChecksums(f, verbose):
 	timeMarked = time.time()
 
 	try:
-		fh = open(f.path, "rb")
-	except IOError:
+		h = winfile.open(f.path, reading=True, writing=False)
+	except winfile.OpenFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 		return
 	try:
-		checksums = getChecksums(fh)
+		checksums = getChecksums(h)
+		mtime = winfile.getModificationTimeNanoseconds(h)
 	finally:
-		fh.close()
-	mtime = getPreciseModificationTime(f.path)
+		winfile.close(h)
 	sb = StaticBody(timeMarked, mtime, checksums)
 
 	mode = os.stat(f.path).st_mode
 	wasReadOnly = not mode & stat.S_IWRITE
+	if wasReadOnly:
+		# Unset the read-only flag
+		os.chmod(f.path, stat.S_IWRITE)
+	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
+		creationDisposition=win32file.OPEN_ALWAYS)
 	try:
-		if wasReadOnly:
-			# Unset the read-only flag
-			os.chmod(f.path, stat.S_IWRITE)
-		with open(getADSPath(f).path, "wb") as adsW:
-			adsW.write(sb.encode())
+		winfile.write(adsH, sb.encode())
 	finally:
 		# Set the mtime back to what it was before the ADS was written.
 		# We set the mtime on the ADS instead of the file because it
@@ -286,11 +226,10 @@ def setChecksums(f, verbose):
 		#
 		# Note that if this program is killed during the write() above,
 		# the mtime and read-only flags may remain incorrect.
-		setPreciseModificationTime(getADSPath(f).path, mtime)
-		# TODO: perhaps print something other than "NOWRITE" if the
-		# above fails.
+		winfile.setModificationTimeNanoseconds(adsH, mtime)
 		if wasReadOnly:
 			os.chmod(f.path, stat.S_IREAD)
+		winfile.close(adsH)
 
 
 def writeToBothIfVerbose(msg, verbose):
@@ -314,24 +253,10 @@ def writeToStderr(msg):
 def setChecksumsOrPrintMessage(f, verbose):
 	try:
 		setChecksums(f, verbose)
-	except GetTimestampFailed:
-		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
-	except SetTimestampFailed:
-		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
-
-
-def getBody(f):
-	try:
-		h = winfile.open(getADSPath(f).path, reading=True, writing=False)
-		try:
-			body = decodeBody(h)
-		except UnreadableOldVersion:
-			body = None
-		finally:
-			winfile.close(h)
 	except winfile.OpenFailed:
-		body = None
-	return body
+		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+	except winfile.WriteFailed:
+		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
 
 
 # Four possibilities here:
@@ -341,7 +266,20 @@ def getBody(f):
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
 def verifyOrSetChecksums(f, verify, write, inspect, verbose):
-	body = getBody(f)
+	body = None
+	try:
+		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
+	except winfile.OpenFailed:
+		pass
+	else:
+		try:
+			body = decodeBody(adsR)
+			mtime = winfile.getModificationTimeNanoseconds(adsR)
+		except UnreadableOldVersion:
+			body = None
+		finally:
+			winfile.close(adsR)
+
 	if inspect:
 		writeToStdout("INSPECT\t%r" % (f.path,))
 		writeToStdout("#\t%s" % (body.getDescription() if body else repr(body),))
@@ -352,13 +290,6 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 			setChecksumsOrPrintMessage(f, verbose)
 	else:
 		if isinstance(body, StaticBody):
-			try:
-				# Note that the ADS might have disappeared sometime
-				# after the call to getBody().
-				mtime = getPreciseModificationTime(getADSPath(f).path)
-			except GetTimestampFailed:
-				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
-				return
 			##print repr(body.mtime), repr(mtime)
 			if body.mtime != mtime:
 				writeToBothIfVerbose("MODIFIED\t%r" % (f.path,), verbose)
@@ -368,8 +299,11 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 					setChecksumsOrPrintMessage(f, verbose)
 			else:
 				if verify:
-					with open(f.path, "rb") as fh:
-						checksums = getChecksums(fh)
+					h = winfile.open(f.path, reading=True, writing=False)
+					try:
+						checksums = getChecksums(h)
+					finally:
+						winfile.close(h)
 					if checksums != body.checksums:
 						writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
 					else:
@@ -402,14 +336,14 @@ def handlePath(f, verify, write, inspect, verbose):
 
 def getContentIfExists(f, maxRead):
 	try:
-		fh = open(f.path, "rb")
-	except IOError:
+		h = winfile.open(f.path, reading=True, writing=False)
+	except winfile.OpenFailed:
 		return None
 	try:
-		return fh.read(maxRead)
+		return winfile.read(h, maxRead)
 		# Above might raise exception if .read() fails for some reason
 	finally:
-		fh.close()
+		winfile.close(h)
 
 
 _lastExcludes = [None, None]
