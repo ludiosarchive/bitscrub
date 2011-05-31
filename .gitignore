@@ -1,0 +1,5 @@
+/_trial_temp
+/_build
+/_dist
+*.pyc
+*.pyo
