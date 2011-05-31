@@ -85,10 +85,7 @@ def read(h, length):
 	if not ret:
 		raise ReadFailed("Couldn't read from handle %r (%d bytes)" % (h, length))
 
-	read = sbuf.raw
-	if bytesRead.value == 0:
-		read = ''
-	return read
+	return sbuf.raw[:bytesRead.value]
 
 
 class GetLengthFailed(Exception):

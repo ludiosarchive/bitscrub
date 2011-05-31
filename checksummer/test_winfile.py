@@ -23,6 +23,11 @@ class WinFileTests(unittest.TestCase):
 		out = winfile.read(h, 6)
 		self.assertEqual("world\n", out)
 
+		# Read more than available
+		winfile.seek(h, 0)
+		out = winfile.read(h, 15)
+		self.assertEqual("hello world\n", out)
+
 		winfile.seek(h, -2, 2)
 		out = winfile.read(h, 2)
 		self.assertEqual("d\n", out)
