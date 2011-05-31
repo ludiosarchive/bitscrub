@@ -54,6 +54,8 @@ try:
 except ImportError:
 	from filepath import FilePath
 
+from checksummer.winfile import upgradeFilepath
+
 
 ADS_NAME = u"_M"
 VERSION = chr(8)
@@ -116,25 +118,6 @@ class VolatileBody(tuple):
 	def encode(self):
 		return VERSION + "\x01" + struct.pack("<d", self.timeMarked)
 
-
-
-UNC_PREFIX = u"\\\\?\\"
-
-def absPathToUncPath(p):
-	r"""
-	See http://msdn.microsoft.com/en-us/library/aa365247%28v=vs.85%29.aspx#maxpath
-	"""
-	return UNC_PREFIX + p
-
-
-def upgradeFilepath(f):
-	r"""
-	@param f: a L{FilePath} to upgrade.
-	@return: a possibly-upgraded L{FilePath}.
-	"""
-	if not f.path.startswith(UNC_PREFIX):
-		return FilePath(absPathToUncPath(f.path))
-	return f
 
 
 def getADSPath(f):
@@ -369,6 +352,8 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	else:
 		if isinstance(body, StaticBody):
 			try:
+				# Note that the ADS might have disappeared sometime
+				# after the call to getBody().
 				mtime = getPreciseModificationTime(getADSPath(f).path)
 			except GetTimestampFailed:
 				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
