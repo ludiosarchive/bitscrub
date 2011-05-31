@@ -190,7 +190,7 @@ def _getChecksums(h, readSize, blockSize):
 
 
 def getChecksums(h):
-	return list(_getChecksums(h, readSize=1024*1024, blockSize=32*1024*1024))
+	return list(_getChecksums(h, readSize=32*1024, blockSize=32*1024*1024))
 
 
 def setChecksums(f, verbose):
