@@ -40,7 +40,6 @@ import argparse
 import winnt
 import ctypes
 import hashlib
-from collections import namedtuple
 
 import win32file
 
