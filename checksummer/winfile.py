@@ -75,8 +75,17 @@ class ReadFailed(Exception):
 
 
 
+_lastReadBuffer = [None, None]
+
 def read(h, length):
-	sbuf = ctypes.create_string_buffer(length)
+	# If the length is the same, use the last buffer.  It doesn't
+	# matter that it already contains data.
+	if length == _lastReadBuffer[0]:
+		sbuf = _lastReadBuffer[1]
+	else:
+		sbuf = ctypes.create_string_buffer(length)
+		_lastReadBuffer[:] = [length, sbuf]
+
 	bytesRead = ctypes.c_long(0)
 	ret = ctypes.windll.kernel32.ReadFile(
 		ctypes.c_long(h),
