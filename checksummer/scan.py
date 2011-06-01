@@ -306,18 +306,17 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 				# Existing checksums are probably obsolete, so just
 				# set new checksums.
 				setChecksumsOrPrintMessage(f, verbose)
-		else:
-			if verify:
-				h = winfile.open(f.path, reading=True, writing=False)
-				try:
-					checksums = getChecksums(h)
-				finally:
-					winfile.close(h)
-				if checksums != body.checksums:
-					writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
-				else:
-					if verbose:
-						writeToStderr("VERIFIED\t%r" % (f.path,))
+		elif verify:
+			h = winfile.open(f.path, reading=True, writing=False)
+			try:
+				checksums = getChecksums(h)
+			finally:
+				winfile.close(h)
+			if checksums != body.checksums:
+				writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
+			else:
+				if verbose:
+					writeToStderr("VERIFIED\t%r" % (f.path,))
 	# for VolatileBody, do nothing
 
 
