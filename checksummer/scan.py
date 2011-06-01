@@ -276,11 +276,10 @@ def setChecksumsOrPrintMessage(f, verbose):
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
 def verifyOrSetChecksums(f, verify, write, inspect, verbose):
-	body = None
 	try:
 		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
 	except winfile.OpenFailed:
-		pass
+		body = None
 	else:
 		try:
 			body = decodeBody(adsR)
@@ -307,16 +306,20 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 				# set new checksums.
 				setChecksumsOrPrintMessage(f, verbose)
 		elif verify:
-			h = winfile.open(f.path, reading=True, writing=False)
 			try:
-				checksums = getChecksums(h)
-			finally:
-				winfile.close(h)
-			if checksums != body.checksums:
-				writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
+				h = winfile.open(f.path, reading=True, writing=False)
+			except winfile.OpenFailed:
+				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 			else:
-				if verbose:
-					writeToStderr("VERIFIED\t%r" % (f.path,))
+				try:
+					checksums = getChecksums(h)
+				finally:
+					winfile.close(h)
+				if checksums != body.checksums:
+					writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
+				else:
+					if verbose:
+						writeToStderr("VERIFIED\t%r" % (f.path,))
 	# for VolatileBody, do nothing
 
 
