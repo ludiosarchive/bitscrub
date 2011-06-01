@@ -75,12 +75,12 @@ class ReadFailed(Exception):
 
 
 
-_lastReadBuffer = [None, None]
+_lastReadBuffer = [-1, None]
 
 def read(h, length):
-	# If the length is the same, use the last buffer.  It doesn't
-	# matter that it already contains data.
-	if length == _lastReadBuffer[0]:
+	# If the length is the same or less, use the last buffer.
+	# It doesn't matter that it already contains data.
+	if length <= _lastReadBuffer[0]:
 		sbuf = _lastReadBuffer[1]
 	else:
 		sbuf = ctypes.create_string_buffer(length)
