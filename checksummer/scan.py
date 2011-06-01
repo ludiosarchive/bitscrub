@@ -224,7 +224,7 @@ def setChecksums(f, verbose):
 		# Unset the read-only flag
 		os.chmod(f.path, stat.S_IWRITE)
 	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
-		creationDisposition=win32file.OPEN_ALWAYS)
+		creationDisposition=win32file.CREATE_ALWAYS)
 	try:
 		winfile.write(adsH, sb.encode())
 	finally:
