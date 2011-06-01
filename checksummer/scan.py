@@ -9,6 +9,14 @@ TODO:
 	file; if return value is True, do scan the file.
 
 
+Implementation notes:
+
+Why do we use checksummer.winfile instead of the normall open()?  Because
+the normal open() doesn't enable FILE_SHARE_DEELETE, so no one can
+delete the file when it's open.  This could mess up other programs as we
+scan almost all of the files on the disk.
+
+
 Some useful documentation for developers:
 
 How To Use NTFS Alternate Data Streams
@@ -52,6 +60,8 @@ except ImportError:
 	from filepath import FilePath
 
 import checksummer.winfile as winfile
+
+_postImportVars = vars().keys()
 
 
 ADS_NAME = u"_M"
@@ -404,6 +414,15 @@ def main():
 			excludes = getExcludesForDirectory(winfile.parentEx(f))
 			if f.basename() not in excludes:
 				handlePath(f, **kwargs)
+
+
+try:
+	from refbinder.api import bindRecursive, enableBinders
+except ImportError:
+	pass
+else:
+	enableBinders()
+	bindRecursive(sys.modules[__name__], _postImportVars)
 
 
 if __name__ == '__main__':

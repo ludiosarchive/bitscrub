@@ -1,3 +1,4 @@
+import sys
 import ctypes
 import win32file
 import winnt
@@ -6,6 +7,8 @@ try:
 	from twisted.python.filepath import FilePath
 except ImportError:
 	from filepath import FilePath
+
+_postImportVars = vars().keys()
 
 
 UNC_PREFIX = u"\\\\?\\"
@@ -196,3 +199,12 @@ def parentEx(f):
 	if parent.path.endswith(u":"):
 		return FilePath(parent.path + u"\\")
 	return parent
+
+
+try:
+	from refbinder.api import bindRecursive, enableBinders
+except ImportError:
+	pass
+else:
+	enableBinders()
+	bindRecursive(sys.modules[__name__], _postImportVars)
