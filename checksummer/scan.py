@@ -8,6 +8,9 @@ TODO:
 *	Support passing in a "file exclude function"; function is called for every
 	file; if return value is True, do scan the file.
 
+*	Notice when the mtime changes while the file is being read, and do
+	something different.
+
 
 Implementation notes:
 
