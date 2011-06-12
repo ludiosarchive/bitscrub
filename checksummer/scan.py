@@ -139,14 +139,14 @@ class UnreadableOldVersion(Exception):
 
 
 
-def decodeBody(h):
+def decodeBody(h, fileSize):
 	winfile.seek(h, 0)
 	version = ord(winfile.read(h, 1))
 	if version < 7:
 		raise UnreadableOldVersion("Can't read version %r" % (version,))
 	if version == 7:
 		# Version 7 had a bug that omitted a checksum for some files.
-		if winfile.getFileSize(h) % (1024*1024) == 0:
+		if fileSize % (1024*1024) == 0:
 			raise UnreadableOldVersion("Can't read version %r for files "
 				"whose length is a multiple of 1024*1024" % (version,))
 	volatileStr = winfile.read(h, 1)
@@ -280,12 +280,19 @@ def setChecksumsOrPrintMessage(f, verbose):
 
 def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	try:
+		# Needed only for decodeBody to work around an old bug
+		fileSize = f.getsize()
+	except (OSError, IOError):
+		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		return
+
+	try:
 		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
 	except winfile.OpenFailed:
 		body = None
 	else:
 		try:
-			body = decodeBody(adsR)
+			body = decodeBody(adsR, fileSize)
 			mtime = winfile.getModificationTimeNanoseconds(adsR)
 		except UnreadableOldVersion:
 			body = None
