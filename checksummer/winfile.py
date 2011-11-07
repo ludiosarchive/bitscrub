@@ -1,4 +1,5 @@
 import sys
+import datetime
 import ctypes
 import win32file
 import winnt
@@ -166,6 +167,11 @@ class GetMetadataFailed(Exception):
 class SetMetadataFailed(Exception):
 	pass
 
+
+
+def winTimeToDatetime(t):
+	return (datetime.datetime(1601, 1, 1) +
+		datetime.timedelta(microseconds=t / 10))
 
 
 def getCreationTimeNanoseconds(h):

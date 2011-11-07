@@ -62,7 +62,7 @@ try:
 except ImportError:
 	from filepath import FilePath
 
-import checksummer.winfile as winfile
+from checksummer import winfile
 
 _postImportVars = vars().keys()
 
@@ -89,8 +89,7 @@ class StaticBody(tuple):
 
 	def getDescription(self):
 		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
-		mtimeDate = (datetime.datetime(1601, 1, 1) +
-			datetime.timedelta(microseconds=self.mtime / 10))
+		mtimeDate = winfile.winTimeToDatetime(self.mtime)
 		checksumsHex = list(s.encode("hex") for s in self.checksums)
 		return "<StaticBody marked at %s when mtime was %s; checksums=%r>" % (
 			markedStr, mtimeDate.isoformat(), checksumsHex)
