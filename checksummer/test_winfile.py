@@ -79,9 +79,14 @@ class WinFileTests(unittest.TestCase):
 		h = winfile.open(temp, reading=False, writing=True,
 			creationDisposition=win32file.OPEN_ALWAYS)
 
+		old_ctime = winfile.getCreationTimeNanoseconds(h)
+
 		now = winfile.getModificationTimeNanoseconds(h)
 		self.assertTrue(now > 1000000000000, now) # probably even larger
 
 		winfile.setModificationTimeNanoseconds(h, 1)	
 		now = winfile.getModificationTimeNanoseconds(h)
 		self.assertEqual(1, now)
+
+		# Test that creation time was unchanged
+		self.assertEqual(winfile.getCreationTimeNanoseconds(h), old_ctime)

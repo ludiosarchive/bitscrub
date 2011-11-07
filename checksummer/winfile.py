@@ -168,18 +168,51 @@ class SetMetadataFailed(Exception):
 
 
 
+def getCreationTimeNanoseconds(h):
+	ctime, _, _ = getCreationAccessModificationTimeNanoseconds(h)
+	return ctime
+
+
+def getAccessTimeNanoseconds(h):
+	_, atime, _ = getCreationAccessModificationTimeNanoseconds(h)
+	return atime
+
+
 def getModificationTimeNanoseconds(h):
-	mtime = ctypes.c_ulonglong(0)
-	ret = ctypes.windll.kernel32.GetFileTime(h, 0, 0, ctypes.pointer(mtime))
-	if ret == 0:
-		raise GetMetadataFailed(
-			"Return code 0 from GetFileTime: %r" % (ctypes.GetLastError(),))
-	return mtime.value
+	_, _, mtime = getCreationAccessModificationTimeNanoseconds(h)
+	return mtime
+
+
+def setCreationTimeNanoseconds(h, ns):
+	return setCreationAccessModificationTimeNanoseconds(h, ns, 0, 0)
+
+
+def setAccessTimeNanoseconds(h, ns):
+	return setCreationAccessModificationTimeNanoseconds(h, 0, ns, 0)
 
 
 def setModificationTimeNanoseconds(h, ns):
-	mtime = ctypes.c_ulonglong(ns)
-	ret = ctypes.windll.kernel32.SetFileTime(h, 0, 0, ctypes.pointer(mtime))
+	return setCreationAccessModificationTimeNanoseconds(h, 0, 0, ns)
+
+
+def getCreationAccessModificationTimeNanoseconds(h):
+	ctime = ctypes.c_ulonglong(0)
+	atime = ctypes.c_ulonglong(0)
+	mtime = ctypes.c_ulonglong(0)
+	ret = ctypes.windll.kernel32.GetFileTime(
+		h, ctypes.pointer(ctime), ctypes.pointer(atime), ctypes.pointer(mtime))
+	if ret == 0:
+		raise GetMetadataFailed(
+			"Return code 0 from GetFileTime: %r" % (ctypes.GetLastError(),))
+	return (ctime.value, atime.value, mtime.value)
+
+
+def setCreationAccessModificationTimeNanoseconds(h, c_ns, a_ns, m_ns):
+	ctime = ctypes.c_ulonglong(c_ns)
+	atime = ctypes.c_ulonglong(a_ns)
+	mtime = ctypes.c_ulonglong(m_ns)
+	ret = ctypes.windll.kernel32.SetFileTime(
+		h, ctypes.pointer(ctime), ctypes.pointer(atime), ctypes.pointer(mtime))
 	if ret == 0:
 		raise SetMetadataFailed(
 			"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
