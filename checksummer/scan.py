@@ -46,6 +46,7 @@ import sys
 import struct
 import time
 import datetime
+import functools
 import operator
 import argparse
 import hashlib
@@ -332,7 +333,7 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 	# for VolatileBody, do nothing
 
 
-def shouldDescend(f):
+def shouldDescend(verbose, f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
 		return False
@@ -345,7 +346,7 @@ def shouldDescend(f):
 	try:
 		os.listdir(f.path)
 	except OSError: # A "Permission denied" WindowsError, usually
-		writeToBothOuts("NOLISTDIR\t%r" % (f.path,))
+		writeToBothIfVerbose("NOLISTDIR\t%r" % (f.path,), verbose)
 		return False
 	return True
 
@@ -423,7 +424,7 @@ def main():
 		# raises WindowsError.
 		p = winfile.upgradeFilepath(FilePath(fname.decode("ascii")))
 		if p.isdir():
-			for f in p.walk(descend=shouldDescend):
+			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
 				excludes = getExcludesForDirectory(winfile.parentEx(f))
 				if f.basename() not in excludes:
 					handlePath(f, **kwargs)
