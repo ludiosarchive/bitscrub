@@ -434,6 +434,8 @@ def main():
 			if f.basename() not in excludes:
 				handlePath(f, **kwargs)
 
+	writeToBothIfVerbose("FINISHED", args.verbose)
+
 
 try:
 	from refbinder.api import bindRecursive, enableBinders
