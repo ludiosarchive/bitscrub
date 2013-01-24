@@ -340,10 +340,11 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 		except winfile.OpenFailed:
 			writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 		else:
-			if verbose:
-				writeToStderr("COMPRESSED\t%r" % (f.path,))
 			try:
-				winfile.compress(h)
+				if not winfile.isCompressed(f.path):
+					winfile.compress(h)
+					if verbose:
+						writeToStderr("COMPRESSED\t%r" % (f.path,))
 			finally:
 				winfile.close(h)
 

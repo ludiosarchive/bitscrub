@@ -177,6 +177,14 @@ def decompress(h):
 	win32file.DeviceIoControl(h, FSCTL_SET_COMPRESSION, COMPRESSION_FORMAT_NONE, 0)
 
 
+def isCompressed(fname):
+	if not isinstance(fname, unicode):
+		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
+
+	attribs = win32file.GetFileAttributesW(fname)
+	return bool(attribs & winnt.FILE_ATTRIBUTE_COMPRESSED)
+
+
 class GetMetadataFailed(Exception):
 	pass
 
