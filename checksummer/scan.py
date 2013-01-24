@@ -272,11 +272,31 @@ def setChecksumsOrPrintMessage(f, verbose):
 		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
 
 
+highEntropyExtensions = """
+	jpeg jpg gif png psd zip zipx z gz bz2 7z xz rar deb rpm apk sitx pkg pptx docx xlsx
+	exe pdf epub mobi djvu mp3 mp4 avi m4a m4v mkv ogg webm wmv flac video flv
+	mov torrent""".split()
+lowEntropyExtensions = """
+	bmp txt log htm html shtml xhtml svg mht mhtml php cgi rss atom js css py pyc
+	pl rb hs el clj cljs c cpp cxx cs lua java sh patch diff ini ico jar tar ppt
+	doc xls rtf dll so pyd class o json xml srt csv feed comments nzb lst nfo rdf""".split()
+
+def expectedCompressionState(f):
+	ext = f.basename().rsplit('.', 1)[-1].lower()
+	if ext in lowEntropyExtensions:
+		return "COMPRESSED"
+	elif ext in highEntropyExtensions:
+		return "DECOMPRESSED"
+	else:
+		return "AS_IS"
+
+
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOREAD/MODIFIED
 # verify=True, write=False -> verify checksums for non-modified files
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
+# + compress/decompress as needed
 
 def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 	detectedCorruption = False
@@ -335,18 +355,24 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 	# for VolatileBody, do nothing
 
 	if compress and not detectedCorruption:
-		try:
-			h = winfile.open(f.path, reading=True, writing=True)
-		except winfile.OpenFailed:
-			writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
-		else:
-			try:
-				if not winfile.isCompressed(f.path):
-					winfile.compress(h)
-					if verbose:
-						writeToStderr("COMPRESSED\t%r" % (f.path,))
-			finally:
-				winfile.close(h)
+		expectedComp = expectedCompressionState(f)
+		if expectedComp != "AS_IS":
+			currentComp = {True: "COMPRESSED", False: "DECOMPRESSED"}[winfile.isCompressed(f.path)]
+			if currentComp != expectedComp:
+				try:
+					h = winfile.open(f.path, reading=True, writing=True)
+				except winfile.OpenFailed:
+					writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+				else:
+					try:
+						if expectedComp == "COMPRESSED":
+							winfile.compress(h)
+						elif expectedComp == "DECOMPRESSED":
+							winfile.decompress(h)
+						if verbose:
+							writeToStderr("%s\t%r" % (expectedComp, f.path))
+					finally:
+						winfile.close(h)
 
 
 def shouldDescend(verbose, f):
