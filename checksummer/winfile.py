@@ -1,8 +1,13 @@
 import sys
+import struct
 import datetime
 import ctypes
 import win32file
 import winnt
+from winioctlcon import FSCTL_SET_COMPRESSION
+
+COMPRESSION_FORMAT_NONE = struct.pack('H', 0)
+COMPRESSION_FORMAT_DEFAULT = struct.pack('H', 1)
 
 try:
 	from twisted.python.filepath import FilePath
@@ -157,6 +162,19 @@ def seek(h, pos, whence=0):
 	if not ret:
 		raise SeekFailed("Couldn't seek handle %r to %d (whence=%r)" % (h, pos, whence))
 
+
+def compress(h):
+	"""
+	NTFS-compress file at handle C{h}.  C{h} must be opened for reading and writing.
+	"""
+	win32file.DeviceIoControl(h, FSCTL_SET_COMPRESSION, COMPRESSION_FORMAT_DEFAULT, 0)
+
+
+def decompress(h):
+	"""
+	NTFS-decompress file at handle C{h}.  C{h} must be opened for reading and writing.
+	"""
+	win32file.DeviceIoControl(h, FSCTL_SET_COMPRESSION, COMPRESSION_FORMAT_NONE, 0)
 
 
 class GetMetadataFailed(Exception):

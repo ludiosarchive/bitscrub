@@ -278,7 +278,8 @@ def setChecksumsOrPrintMessage(f, verbose):
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
-def verifyOrSetChecksums(f, verify, write, inspect, verbose):
+def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
+	detectedCorruption = False
 	try:
 		# Needed only for decodeBody to work around an old bug
 		fileSize = f.getsize()
@@ -326,11 +327,25 @@ def verifyOrSetChecksums(f, verify, write, inspect, verbose):
 				finally:
 					winfile.close(h)
 				if checksums != body.checksums:
+					detectedCorruption = True
 					writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
 				else:
 					if verbose:
 						writeToStderr("VERIFIED\t%r" % (f.path,))
 	# for VolatileBody, do nothing
+
+	if compress and not detectedCorruption:
+		try:
+			h = winfile.open(f.path, reading=True, writing=True)
+		except winfile.OpenFailed:
+			writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		else:
+			if verbose:
+				writeToStderr("COMPRESSED\t%r" % (f.path,))
+			try:
+				winfile.compress(h)
+			finally:
+				winfile.close(h)
 
 
 def shouldDescend(verbose, f):
@@ -351,9 +366,9 @@ def shouldDescend(verbose, f):
 	return True
 
 
-def handlePath(f, verify, write, inspect, verbose):
+def handlePath(f, verify, write, compress, inspect, verbose):
 	if f.isfile() and not winfile.isReparsePoint(f.path):
-		verifyOrSetChecksums(f, verify, write, inspect, verbose)
+		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose)
 
 
 def getContentIfExists(f, maxRead):
@@ -403,14 +418,16 @@ def main():
 	parser.add_argument('-w', '--write', dest='write', action='store_true',
 		help="calculate and write checksums for files that "
 			"have no checksum, or have an updated mtime")
+	parser.add_argument('-c', '--compress', dest='compress', action='store_true',
+		help="compress/decompress/do nothing based on probable file entropy")
 	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
 		default=True, help="don't print important and unimportant messages to stderr")
 
 	args = parser.parse_args()
-	kwargs = dict(verify=args.verify, write=args.write,
-		inspect=args.inspect, verbose=args.verbose)
+	kwargs = dict(verify=args.verify, write=args.write, inspect=args.inspect,
+		verbose=args.verbose, compress=args.compress)
 
 	for fname in args.path:
 		# Must convert path like C: to C:\, because C: means "the
