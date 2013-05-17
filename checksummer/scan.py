@@ -278,7 +278,7 @@ def setChecksumsOrPrintMessage(f, verbose):
 highEntropyExtensions = """
 	jpeg jpg gif png psd zip zipx z gz bz2 7z xz rar deb rpm apk sitx pkg pptx docx xlsx
 	exe pdf epub mobi djvu mp3 mp4 avi m4a m4v mkv ogg webm wmv flac video flv
-	mov torrent""".split()
+	mov torrent par2""".split()
 lowEntropyExtensions = """
 	bmp txt log htm html shtml xhtml svg mht mhtml php cgi rss atom js css py pyc
 	pl rb hs el clj cljs c cpp cxx cs lua java sh patch diff ini ico jar tar ppt
@@ -289,6 +289,7 @@ def expectedCompressionState(f):
 	if ext in lowEntropyExtensions:
 		return "COMPRESSED"
 	elif ext in highEntropyExtensions:
+		# TODO: look at size-on-disk/file size and don't decompress files that have compressed well
 		return "DECOMPRESSED"
 	else:
 		return "AS_IS"
