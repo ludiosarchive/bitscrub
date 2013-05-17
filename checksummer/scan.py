@@ -52,6 +52,9 @@ import argparse
 import hashlib
 
 import win32file
+import win32api
+import win32con
+import win32process
 
 try:
 	import simplejson as json
@@ -429,6 +432,15 @@ def getExcludesForDirectory(p):
 	return excludes
 
 
+def reducePriority():
+	"""
+	Set process priority to IDLE_PRIORITY_CLASS to reduce our CPU and IO priority.
+	"""
+	pid = win32api.GetCurrentProcessId()
+	handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
+	win32process.SetPriorityClass(handle, win32process.IDLE_PRIORITY_CLASS)
+
+
 def main():
 	parser = argparse.ArgumentParser(description="""
 	Reads and/or writes checksums of files in the files' ADS (alternate data stream).
@@ -455,6 +467,8 @@ def main():
 	args = parser.parse_args()
 	kwargs = dict(verify=args.verify, write=args.write, inspect=args.inspect,
 		verbose=args.verbose, compress=args.compress)
+
+	reducePriority()
 
 	for fname in args.path:
 		# Must convert path like C: to C:\, because C: means "the
