@@ -282,7 +282,7 @@ highEntropyExtensions = """
 lowEntropyExtensions = """
 	bmp txt log htm html shtml xhtml svg mht mhtml php cgi rss atom js css py pyc
 	pl rb hs el clj cljs c cpp cxx cs lua java sh patch diff ini ico jar tar ppt
-	doc xls rtf dll so pyd class o json xml srt csv feed comments nzb lst nfo rdf""".split()
+	doc xls rtf dll so pyd class o json xml srt csv feed comments nzb lst nfo rdf cdx""".split()
 
 def expectedCompressionState(f):
 	ext = f.basename().rsplit('.', 1)[-1].lower()
