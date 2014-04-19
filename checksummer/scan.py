@@ -215,11 +215,14 @@ def setChecksums(f, verbose):
 	try:
 		h = winfile.open(f.path, reading=True, writing=False)
 	except winfile.OpenFailed:
-		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 		return
 	try:
 		checksums = getChecksums(h)
 		mtime = winfile.getModificationTimeNanoseconds(h)
+	except winfile.ReadFailed:
+		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		return
 	finally:
 		winfile.close(h)
 	sb = StaticBody(timeMarked, mtime, checksums)
@@ -270,7 +273,7 @@ def setChecksumsOrPrintMessage(f, verbose):
 	try:
 		setChecksums(f, verbose)
 	except winfile.OpenFailed:
-		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 	except winfile.WriteFailed:
 		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
 
@@ -296,7 +299,7 @@ def expectedCompressionState(f):
 
 
 # Four possibilities here:
-# verify=False, write=False -> just recurse and print NEW/NOREAD/MODIFIED
+# verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
 # verify=True, write=False -> verify checksums for non-modified files
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
@@ -308,7 +311,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 		# Needed only for decodeBody to work around an old bug
 		fileSize = f.getsize()
 	except (OSError, IOError):
-		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+		writeToBothIfVerbose("NOSTAT\t%r" % (f.path,), verbose)
 		return
 
 	try:
@@ -344,7 +347,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 			try:
 				h = winfile.open(f.path, reading=True, writing=False)
 			except winfile.OpenFailed:
-				writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+				writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 			else:
 				try:
 					checksums = getChecksums(h)
@@ -366,7 +369,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 				try:
 					h = winfile.open(f.path, reading=True, writing=True)
 				except winfile.OpenFailed:
-					writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+					writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 				else:
 					try:
 						if expectedComp == "COMPRESSED":
