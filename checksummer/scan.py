@@ -351,14 +351,18 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 			else:
 				try:
 					checksums = getChecksums(h)
+				except winfile.ReadFailed:
+					writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+				else:
+					if checksums != body.checksums:
+						detectedCorruption = True
+						writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
+					else:
+						if verbose:
+							writeToStderr("VERIFIED\t%r" % (f.path,))
 				finally:
 					winfile.close(h)
-				if checksums != body.checksums:
-					detectedCorruption = True
-					writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
-				else:
-					if verbose:
-						writeToStderr("VERIFIED\t%r" % (f.path,))
+
 	# for VolatileBody, do nothing
 
 	if compress and not detectedCorruption:
