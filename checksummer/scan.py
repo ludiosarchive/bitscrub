@@ -137,25 +137,27 @@ def getADSPath(f):
 	return FilePath(f.path + u":" + ADS_NAME)
 
 
-class UnreadableOldVersion(Exception):
+class UnreadableBody(Exception):
 	pass
 
 
 
 def decodeBody(h, fileSize):
 	winfile.seek(h, 0)
-	version = ord(winfile.read(h, 1))
+	version_s = winfile.read(h, 1)
+	if not version_s:
+		raise UnreadableBody("Body is empty")
+	version = ord(version_s)
 	if version < 7:
-		raise UnreadableOldVersion("Can't read version %r" % (version,))
+		raise UnreadableBody("Can't read version %r" % (version,))
 	if version == 7:
 		# Version 7 had a bug that omitted a checksum for some files.
 		if fileSize % (1024*1024) == 0:
-			raise UnreadableOldVersion("Can't read version %r for files "
+			raise UnreadableBody("Can't read version %r for files "
 				"whose length is a multiple of 1024*1024" % (version,))
 	volatileStr = winfile.read(h, 1)
 	if not volatileStr:
-		# TODO: new exception
-		raise UnreadableOldVersion("Truncated ADS?")
+		raise UnreadableBody("Truncated ADS?")
 	isVolatile = bool(ord(volatileStr))
 	timeMarked = struct.unpack("<d", winfile.read(h, 8))[0]
 	mtime = struct.unpack("<Q", winfile.read(h, 8))[0]
@@ -322,7 +324,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 		try:
 			body = decodeBody(adsR, fileSize)
 			mtime = winfile.getModificationTimeNanoseconds(adsR)
-		except UnreadableOldVersion:
+		except UnreadableBody:
 			body = None
 		finally:
 			winfile.close(adsR)
