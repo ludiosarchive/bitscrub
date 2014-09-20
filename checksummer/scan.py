@@ -239,6 +239,13 @@ def setChecksums(f, verbose):
 	try:
 		winfile.write(adsH, sb.encode())
 	finally:
+		# Get the handle again because in some cases (when the file is open
+		# in uTorrent?), the handle disappears and SetFileTime returns with
+		# error code 6.
+		winfile.close(adsH)
+		# We just wrote the ADS, so no need for CREATE_ALWAYS
+		adsH = winfile.open(getADSPath(f).path, reading=False, writing=True)
+
 		# Set the mtime back to what it was before the ADS was written.
 		# We set the mtime on the ADS instead of the file because it
 		# might be impossible to open the file with GENERIC_WRITE access
@@ -247,8 +254,13 @@ def setChecksums(f, verbose):
 		#
 		# Note that if this program is killed during the write() above,
 		# the mtime and read-only flags may remain incorrect.
-		winfile.setModificationTimeNanoseconds(adsH, mtime)
-		winfile.close(adsH)
+		try:
+			winfile.setModificationTimeNanoseconds(adsH, mtime)
+		except winfile.SetMetadataFailed:
+			writeToStderr("Failed to set modification time on %r" % (f.path,))
+			raise
+		finally:
+			winfile.close(adsH)
 		if wasReadOnly:
 			os.chmod(f.path, stat.S_IREAD)
 
