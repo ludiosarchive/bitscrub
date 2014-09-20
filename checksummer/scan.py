@@ -225,6 +225,9 @@ def setChecksums(f, verbose):
 	except winfile.ReadFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 		return
+	except winfile.SeekFailed:
+		writeToBothIfVerbose("NOSEEK\t%r" % (f.path,), verbose)
+		return
 	finally:
 		winfile.close(h)
 	sb = StaticBody(timeMarked, mtime, checksums)
