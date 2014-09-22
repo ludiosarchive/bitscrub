@@ -152,12 +152,15 @@ class SeekFailed(Exception):
 
 
 def seek(h, pos, whence=0):
-	ret = ctypes.windll.kernel32.SetFilePointerEx(
-		ctypes.c_long(h),
-		ctypes.c_longlong(pos),
-		ctypes.c_long(0), # NULL for lpNewFilePointer
-		ctypes.c_long(whence)
-	)
+	try:
+		ret = ctypes.windll.kernel32.SetFilePointerEx(
+			ctypes.c_long(h),
+			ctypes.c_longlong(pos),
+			ctypes.c_long(0), # NULL for lpNewFilePointer
+			ctypes.c_long(whence)
+		)
+	except WindowsError as e:
+		raise SeekFailed("%r" % (e,))
 
 	if not ret:
 		raise SeekFailed("Couldn't seek handle %r to %d (whence=%r)" % (h, pos, whence))
