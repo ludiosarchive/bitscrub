@@ -236,7 +236,11 @@ def setChecksums(f, verbose):
 	wasReadOnly = not mode & stat.S_IWRITE
 	if wasReadOnly:
 		# Unset the read-only flag
-		os.chmod(f.path, stat.S_IWRITE)
+		try:
+			os.chmod(f.path, stat.S_IWRITE)
+		except WindowsError:
+			writeToBothIfVerbose("NOCHMOD\t%r" % (f.path,), verbose)
+			return
 	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
 		creationDisposition=win32file.CREATE_ALWAYS)
 	try:
