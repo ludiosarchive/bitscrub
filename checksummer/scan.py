@@ -15,7 +15,7 @@ TODO:
 Implementation notes:
 
 Why do we use checksummer.winfile instead of the normall open()?  Because
-the normal open() doesn't enable FILE_SHARE_DEELETE, so no one can
+the normal open() doesn't enable FILE_SHARE_DELETE, so no one can
 delete the file when it's open.  This could mess up other programs as we
 scan almost all of the files on the disk.
 
