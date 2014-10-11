@@ -551,16 +551,20 @@ def main():
 	reducePriority()
 
 	for fname in args.path:
-		# Must convert path like C: to C:\, because C: means "the
-		# current directory for the C:" drive.  And we must do this
-		# before turning it into a FilePath because FilePath will
-		# immediately turn C: into C:\some-path
-		if fname.endswith(":"):
-			fname += "\\"
+		if os.name == 'nt':
+			# Must convert path like C: to C:\, because C: means "the
+			# current directory for the C:" drive.  And we must do this
+			# before turning it into a FilePath because FilePath will
+			# immediately turn C: into C:\some-path
+			if fname.endswith(":"):
+				fname += "\\"
 
-		# *must* use a unicode path because listdir'ing a `str` extended path
-		# raises WindowsError.
-		p = winfile.upgradeFilepath(SortedListdirFilePath(fname.decode("ascii")))
+			# *must* use a unicode path because listdir'ing a `str` extended path
+			# raises WindowsError.
+			p = winfile.upgradeFilepath(SortedListdirFilePath(fname.decode("ascii")))
+		else:
+			p = SortedListdirFilePath(fname)
+
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
 				excludes = getExcludesForDirectory(winfile.parentEx(f))
