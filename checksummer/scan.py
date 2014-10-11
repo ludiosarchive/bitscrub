@@ -349,6 +349,9 @@ def getWeirdHexdigest(checksums):
 
 
 def writeListingLine(listing, t, digest, size, f):
+	if listing is None:
+		return
+
 	if size is not None:
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
