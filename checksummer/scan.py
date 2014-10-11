@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 """
 Checksummer reads and/or writes checksums of files in the files' ADS
 (alternate data stream).  Works only on NTFS partitions.
@@ -538,7 +540,7 @@ def main():
 		default=True, help="don't print important and unimportant messages to stderr")
 	parser.add_argument('-l', '--listing', dest='listing',
 		default=None, help="generate a file listing into this file (columns: "
-			"Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
+			"dentry type, Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
 
 	args = parser.parse_args()
 	kwargs = dict(verify=args.verify, write=args.write, inspect=args.inspect,
