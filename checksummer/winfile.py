@@ -6,6 +6,8 @@ import win32file
 import winnt
 from winioctlcon import FSCTL_SET_COMPRESSION
 
+CREATE_ALWAYS = win32file.CREATE_ALWAYS
+
 COMPRESSION_FORMAT_NONE = struct.pack('H', 0)
 COMPRESSION_FORMAT_DEFAULT = struct.pack('H', 1)
 

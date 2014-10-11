@@ -54,8 +54,6 @@ import operator
 import argparse
 import hashlib
 
-import win32file
-
 try:
 	import simplejson as json
 except ImportError:
@@ -66,7 +64,10 @@ try:
 except ImportError:
 	from filepath import FilePath
 
-from checksummer import winfile
+if os.name == 'nt':
+	from checksummer import winfile
+else:
+	from checksummer import posixfile as winfile
 
 _postImportVars = vars().keys()
 
@@ -133,7 +134,14 @@ class VolatileBody(tuple):
 
 
 
+class ADSOnlyOnWindows(Exception):
+	pass
+
+
+
 def getADSPath(f):
+	if os.name != 'nt':
+		raise ADSOnlyOnWindows()
 	return FilePath(f.path + u":" + ADS_NAME)
 
 
@@ -218,6 +226,10 @@ def getChecksums(h):
 
 
 def setChecksums(f, verbose):
+	if os.name != 'nt':
+		# LOL, go use ZFS
+		raise RuntimeError("Can't set checksums on non-Windows")
+
 	timeMarked = time.time()
 
 	try:
@@ -248,7 +260,7 @@ def setChecksums(f, verbose):
 			writeToBothIfVerbose("NOCHMOD\t%r" % (f.path,), verbose)
 			return checksums
 	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
-		creationDisposition=win32file.CREATE_ALWAYS)
+		creationDisposition=winfile.CREATE_ALWAYS)
 	try:
 		winfile.write(adsH, sb.encode())
 	finally:
@@ -355,7 +367,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 
 	try:
 		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
-	except winfile.OpenFailed:
+	except (ADSOnlyOnWindows, winfile.OpenFailed):
 		body = None
 	else:
 		try:
@@ -405,6 +417,8 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 	# for VolatileBody, do nothing
 
 	if compress and not detectedCorruption:
+		if os.name != 'nt':
+			raise RuntimeError("Can't compress on non-Windows")
 		expectedComp = expectedCompressionState(f)
 		if expectedComp != "AS_IS":
 			currentComp = {True: "COMPRESSED", False: "DECOMPRESSED"}[winfile.isCompressed(f.path)]
@@ -481,7 +495,7 @@ def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	elif f.isdir():
 		listing.write("D\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
 	else:
-		1/0
+		listing.write("O\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
 
 
 def getContentIfExists(f, maxRead):
