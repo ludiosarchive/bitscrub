@@ -46,6 +46,8 @@ FILE_SHARE_ALL = (
 	win32file.FILE_SHARE_READ |
 	win32file.FILE_SHARE_WRITE)
 
+pyOpen = open
+
 def open(fname, reading, writing, shareMode=FILE_SHARE_ALL,
 creationDisposition=win32file.OPEN_EXISTING):
 	"""
@@ -253,7 +255,25 @@ def setCreationAccessModificationTimeNanoseconds(h, c_ns, a_ns, m_ns):
 			"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
 
 
-def isReparsePoint(fname):
+def getSymlinkTarget(f):
+	try:
+		h = open(f.path, reading=True, writing=False)
+	except OpenFailed:
+		return None
+	try:
+		bufSize = 256
+		buf = ' ' * bufSize
+		readSize = ctypes.windll.kernel32.GetFinalPathNameByHandleW(h, buf, bufSize, 0)
+		if readSize >= bufSize:
+			assert bufSize <= 1024*1024, bufSize
+			return getSymlinkTarget(h, bufSize * 2)
+		return buf[:readSize * 2].decode("utf-16-le")
+	finally:
+		close(h)
+
+
+def isReparsePoint(f):
+	fname = f.path
 	if not isinstance(fname, unicode):
 		raise TypeError("Filename %r must be unicode, was %r" % (fname, type(fname),))
 

@@ -43,6 +43,7 @@ http://msdn.microsoft.com/en-us/library/aa364404%28v=vs.85%29.aspx
 from __future__ import with_statement
 
 import os
+import types
 import stat
 import sys
 import struct
@@ -139,6 +140,12 @@ def getADSPath(f):
 class UnreadableBody(Exception):
 	pass
 
+
+def utf8IfUnicode(sOrU):
+	if isinstance(sOrU, unicode):
+		return sOrU.encode("utf-8")
+	else:
+		return sOrU
 
 
 def decodeBody(h, fileSize):
@@ -425,7 +432,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 		else:
 			listingChecksums = None
 		digest = getWeirdHexdigest(listingChecksums)
-		listing.write("F\t" + digest + "\t" + f.path + "\n")
+		listing.write("F\t" + digest + "\t" + utf8IfUnicode(f.path) + "\n")
 
 
 class SortedListdirFilePath(FilePath):
@@ -455,7 +462,7 @@ def shouldDescend(verbose, f):
 	if f.basename() in excludes:
 		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
-	if winfile.isReparsePoint(f.path):
+	if winfile.isReparsePoint(f):
 		return False
 	try:
 		os.listdir(f.path)
@@ -466,10 +473,19 @@ def shouldDescend(verbose, f):
 
 
 def handlePath(f, verify, write, compress, inspect, verbose, listing):
-	if f.isfile() and not winfile.isReparsePoint(f.path):
+	if winfile.isReparsePoint(f):
+		# Both junctions and symlinks are considered symlinks here?
+		target = winfile.getSymlinkTarget(f)
+		assert isinstance(target, (unicode, types.NoneType)), type(target)
+		if target is None:
+			target = "?"
+		listing.write("S\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\t->\t" + utf8IfUnicode(target) + "\n")
+	elif f.isfile():
 		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
 	elif f.isdir():
-		listing.write("D\t" + ("-" * 32) + "\t" + f.path + "\n")
+		listing.write("D\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
+	else:
+		1/0
 
 
 def getContentIfExists(f, maxRead):
