@@ -355,15 +355,24 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def writeListingLine(listing, t, digest, mtime, ctime, size, f):
+def writeListingLine(listing, normalizeListing, baseDir, t, digest, mtime, ctime, size, f):
 	if listing is None:
 		return
+
+	p = f.path
+	if normalizeListing:
+		removeMe = baseDir.path + ("\\" if os.name == 'nt' else '/')
+		assert p.startswith(removeMe), (p, removeMe)
+		p = p.replace(removeMe, "", 1)
+		assert len(p) < len(f.path), (p, f.path)
+		if os.name == 'nt':
+			p = p.replace("\\", "/")
 
 	if size is not None:
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	return listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(f.path)]) + "\n")
+	return listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(p)]) + "\n")
 
 
 # Four possibilities here:
@@ -373,7 +382,7 @@ def writeListingLine(listing, t, digest, mtime, ctime, size, f):
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 # + compress/decompress as needed
 
-def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
+def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir):
 	wroteChecksums = None
 	detectedCorruption = False
 	try:
@@ -477,7 +486,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 					winfile.close(h)
 
 		digest = getWeirdHexdigest(listingChecksums)
-		writeListingLine(listing, "F", digest, f.getModificationTime(), f.getStatusChangeTime(), f.getsize(), f)
+		writeListingLine(listing, normalizeListing, baseDir, "F", digest, f.getModificationTime(), f.getStatusChangeTime(), f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -517,16 +526,16 @@ def shouldDescend(verbose, f):
 	return True
 
 
-def handlePath(f, verify, write, compress, inspect, verbose, listing):
+def handlePath(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir):
 	if winfile.isReparsePoint(f):
 		# Pretend all reparse points are "S" symlinks, even though they're not
-		writeListingLine(listing, "S", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
+		writeListingLine(listing, normalizeListing, baseDir, "S", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 	elif f.isfile():
-		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
+		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir)
 	elif f.isdir():
-		writeListingLine(listing, "D", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
+		writeListingLine(listing, normalizeListing, baseDir, "D", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 	else:
-		writeListingLine(listing, "O", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
+		writeListingLine(listing, normalizeListing, baseDir, "O", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 
 
 def getContentIfExists(f, maxRead):
@@ -600,12 +609,25 @@ def main():
 	parser.add_argument('-l', '--listing', dest='listing',
 		default=None, help="generate a file listing into this file (columns: "
 			"dentry type, Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
+	parser.add_argument('-n', '--normalize-listing', dest='normalizeListing', action='store_true',
+		default=False, help="print relative path and / instead of \\ in listing")
 
 	args = parser.parse_args()
-	kwargs = dict(verify=args.verify, write=args.write, inspect=args.inspect,
-		verbose=args.verbose, compress=args.compress, listing=open(args.listing, "wb") if args.listing else None)
+	kwargs = dict(
+		verify=args.verify,
+		write=args.write,
+		inspect=args.inspect,
+		verbose=args.verbose,
+		compress=args.compress,
+		normalizeListing=args.normalizeListing,
+		listing=open(args.listing, "wb") if args.listing else None
+	)
 
 	reducePriority()
+
+	if args.normalizeListing and len(args.path) > 1:
+		raise RuntimeError("Can't print normalized listing because "
+			"more than one path was given: %r" % (args.path,))
 
 	for fname in args.path:
 		if os.name == 'nt':
@@ -626,12 +648,14 @@ def main():
 			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
 				excludes = getExcludesForDirectory(winfile.parentEx(f))
 				if f.basename() not in excludes:
-					handlePath(f, **kwargs)
+					if f == p:
+						continue
+					handlePath(f, baseDir=p, **kwargs)
 		else:
 			f = p
 			excludes = getExcludesForDirectory(winfile.parentEx(f))
 			if f.basename() not in excludes:
-				handlePath(f, **kwargs)
+				handlePath(f, baseDir=p, **kwargs)
 
 	writeToBothIfVerbose("FINISHED", args.verbose)
 
