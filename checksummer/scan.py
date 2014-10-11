@@ -444,7 +444,20 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 		elif body is not None:
 			listingChecksums = body.checksums
 		else:
-			listingChecksums = None
+			# We may not have existing checksums, nor done any
+			# verification, so read the file contents here if necessary.
+			try:
+				h = winfile.open(f.path, reading=True, writing=False)
+			except winfile.OpenFailed:
+				listingChecksums = None
+			else:
+				try:
+					listingChecksums = getChecksums(h)
+				except winfile.ReadFailed:
+					listingChecksums = None
+				finally:
+					winfile.close(h)
+
 		digest = getWeirdHexdigest(listingChecksums)
 		listing.write("F\t" + digest + "\t" + utf8IfUnicode(f.path) + "\n")
 
