@@ -348,6 +348,14 @@ def getWeirdHexdigest(checksums):
 		return m.hexdigest()
 
 
+def writeListingLine(listing, t, digest, size, f):
+	if size is not None:
+		size_s = "{:,d}".format(f.getsize()).rjust(17)
+	else:
+		size_s = "-".rjust(17)
+	return listing.write(t + " " + digest + " " + size_s + " " + utf8IfUnicode(f.path) + "\n")
+
+
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
 # verify=True, write=False -> verify checksums for non-modified files
@@ -459,7 +467,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 					winfile.close(h)
 
 		digest = getWeirdHexdigest(listingChecksums)
-		listing.write("F\t" + digest + "\t" + utf8IfUnicode(f.path) + "\n")
+		writeListingLine(listing, "F", digest, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -502,13 +510,13 @@ def shouldDescend(verbose, f):
 def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	if winfile.isReparsePoint(f):
 		# Pretend all reparse points are "S" symlinks, even though they're not
-		listing.write("S\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
+		writeListingLine(listing, "S", "-" * 32, None, f)
 	elif f.isfile():
 		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
 	elif f.isdir():
-		listing.write("D\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
+		writeListingLine(listing, "D", "-" * 32, None, f)
 	else:
-		listing.write("O\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
+		writeListingLine(listing, "O", "-" * 32, None, f)
 
 
 def getContentIfExists(f, maxRead):
