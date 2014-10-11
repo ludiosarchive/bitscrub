@@ -32,7 +32,7 @@ def upgradeFilepath(f):
 	@return: a possibly-upgraded L{FilePath}.
 	"""
 	if not f.path.startswith(UNC_PREFIX):
-		return FilePath(absPathToUncPath(f.path))
+		return f.clonePath(absPathToUncPath(f.path))
 	return f
 
 

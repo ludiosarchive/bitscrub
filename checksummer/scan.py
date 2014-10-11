@@ -52,9 +52,6 @@ import argparse
 import hashlib
 
 import win32file
-import win32api
-import win32con
-import win32process
 
 try:
 	import simplejson as json
@@ -326,7 +323,7 @@ def expectedCompressionState(f):
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 # + compress/decompress as needed
 
-def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
+def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 	detectedCorruption = False
 	try:
 		# Needed only for decodeBody to work around an old bug
@@ -406,6 +403,28 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose):
 					finally:
 						winfile.close(h)
 
+	if listing:
+		listing.write(f.path + "\n")
+
+
+class SortedListdirFilePath(FilePath):
+	"""
+	Used to make sure we descend in the same order on different machines
+	that have the same copy of the data.
+	"""
+	def listdir(self):
+		paths = os.listdir(self.path)
+		# We decode str to Unicode instead of the other way around
+		# to avoid potential UTF-8 normalization issues on POSIX.
+		# (Note: my POSIX systems use only well-formed UTF-8 filenames)
+		if paths and isinstance(paths[0], str):
+			paths.sort(key=lambda f: f.decode("utf-8"))
+		else:
+			paths.sort()
+		return paths
+
+SortedListdirFilePath.clonePath = SortedListdirFilePath
+
 
 def shouldDescend(verbose, f):
 	# http://twistedmatrix.com/trac/ticket/5123
@@ -425,9 +444,9 @@ def shouldDescend(verbose, f):
 	return True
 
 
-def handlePath(f, verify, write, compress, inspect, verbose):
+def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	if f.isfile() and not winfile.isReparsePoint(f.path):
-		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose)
+		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
 
 
 def getContentIfExists(f, maxRead):
@@ -465,9 +484,15 @@ def reducePriority():
 	"""
 	Set process priority to IDLE_PRIORITY_CLASS to reduce our CPU and IO priority.
 	"""
-	pid = win32api.GetCurrentProcessId()
-	handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
-	win32process.SetPriorityClass(handle, win32process.IDLE_PRIORITY_CLASS)
+	if os.name == 'nt':
+		import win32api
+		import win32con
+		import win32process
+		pid = win32api.GetCurrentProcessId()
+		handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
+		win32process.SetPriorityClass(handle, win32process.IDLE_PRIORITY_CLASS)
+	else:
+		os.nice(5)
 
 
 def main():
@@ -492,10 +517,13 @@ def main():
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
 		default=True, help="don't print important and unimportant messages to stderr")
+	parser.add_argument('-l', '--listing', dest='listing',
+		default=None, help="generate a file listing into this file (columns: "
+			"Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
 
 	args = parser.parse_args()
 	kwargs = dict(verify=args.verify, write=args.write, inspect=args.inspect,
-		verbose=args.verbose, compress=args.compress)
+		verbose=args.verbose, compress=args.compress, listing=open(args.listing, "wb") if args.listing else None)
 
 	reducePriority()
 
@@ -509,7 +537,7 @@ def main():
 
 		# *must* use a unicode path because listdir'ing a `str` extended path
 		# raises WindowsError.
-		p = winfile.upgradeFilepath(FilePath(fname.decode("ascii")))
+		p = winfile.upgradeFilepath(SortedListdirFilePath(fname.decode("ascii")))
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
 				excludes = getExcludesForDirectory(winfile.parentEx(f))
@@ -530,7 +558,7 @@ except ImportError:
 	pass
 else:
 	enableBinders()
-	bindRecursive(sys.modules[__name__], _postImportVars)
+	bindRecursive(sys.modules[__name__], _postImportVars + ["SortedListdirFilePath"])
 
 
 if __name__ == '__main__':
