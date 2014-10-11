@@ -215,16 +215,16 @@ def setChecksums(f, verbose):
 		h = winfile.open(f.path, reading=True, writing=False)
 	except winfile.OpenFailed:
 		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
-		return
+		return None
 	try:
 		checksums = getChecksums(h)
 		mtime = winfile.getModificationTimeNanoseconds(h)
 	except winfile.ReadFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
-		return
+		return None
 	except winfile.SeekFailed:
 		writeToBothIfVerbose("NOSEEK\t%r" % (f.path,), verbose)
-		return
+		return None
 	finally:
 		winfile.close(h)
 	sb = StaticBody(timeMarked, mtime, checksums)
@@ -237,7 +237,7 @@ def setChecksums(f, verbose):
 			os.chmod(f.path, stat.S_IWRITE)
 		except WindowsError:
 			writeToBothIfVerbose("NOCHMOD\t%r" % (f.path,), verbose)
-			return
+			return checksums
 	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
 		creationDisposition=win32file.CREATE_ALWAYS)
 	try:
@@ -267,6 +267,7 @@ def setChecksums(f, verbose):
 			winfile.close(adsH)
 		if wasReadOnly:
 			os.chmod(f.path, stat.S_IREAD)
+	return checksums
 
 
 def writeToBothIfVerbose(msg, verbose):
@@ -289,7 +290,7 @@ def writeToStderr(msg):
 
 def setChecksumsOrPrintMessage(f, verbose):
 	try:
-		setChecksums(f, verbose)
+		return setChecksums(f, verbose)
 	except winfile.OpenFailed:
 		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 	except winfile.WriteFailed:
@@ -316,6 +317,16 @@ def expectedCompressionState(f):
 		return "AS_IS"
 
 
+def getWeirdHexdigest(checksums):
+	if checksums is None:
+		return '?' * 32
+	else:
+		m = hashlib.md5()
+		for c in checksums:
+			m.update(c)
+		return m.hexdigest()
+
+
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
 # verify=True, write=False -> verify checksums for non-modified files
@@ -324,6 +335,7 @@ def expectedCompressionState(f):
 # + compress/decompress as needed
 
 def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
+	wroteChecksums = None
 	detectedCorruption = False
 	try:
 		# Needed only for decodeBody to work around an old bug
@@ -352,7 +364,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
 		if write:
-			setChecksumsOrPrintMessage(f, verbose)
+			wroteChecksums = setChecksumsOrPrintMessage(f, verbose)
 	elif isinstance(body, StaticBody):
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
@@ -404,7 +416,14 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 						winfile.close(h)
 
 	if listing:
-		listing.write(f.path + "\n")
+		if wroteChecksums is not None:
+			listingChecksums = wroteChecksums
+		elif body is not None:
+			listingChecksums = body.checksums
+		else:
+			listingChecksums = None
+		digest = getWeirdHexdigest(listingChecksums)
+		listing.write(digest + "\t" + f.path + "\n")
 
 
 class SortedListdirFilePath(FilePath):
