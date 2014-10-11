@@ -425,7 +425,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 		else:
 			listingChecksums = None
 		digest = getWeirdHexdigest(listingChecksums)
-		listing.write(digest + "\t" + f.path + "\n")
+		listing.write("F\t" + digest + "\t" + f.path + "\n")
 
 
 class SortedListdirFilePath(FilePath):
@@ -468,6 +468,8 @@ def shouldDescend(verbose, f):
 def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	if f.isfile() and not winfile.isReparsePoint(f.path):
 		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
+	elif f.isdir():
+		listing.write("D\t" + ("-" * 32) + "\t" + f.path + "\n")
 
 
 def getContentIfExists(f, maxRead):
