@@ -647,6 +647,7 @@ def main():
 
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
+				assert isinstance(f, SortedListdirFilePath), type(f)
 				excludes = getExcludesForDirectory(winfile.parentEx(f))
 				if f.basename() not in excludes:
 					if f == p:
