@@ -348,7 +348,14 @@ def getWeirdHexdigest(checksums):
 		return m.hexdigest()
 
 
-def writeListingLine(listing, t, digest, size, f):
+def time2iso(t):
+	s = datetime.datetime.utcfromtimestamp(t).isoformat()
+	if not "." in s:
+		s = s + "."
+	return s.ljust(26, "0")
+
+
+def writeListingLine(listing, t, digest, mtime, ctime, size, f):
 	if listing is None:
 		return
 
@@ -356,7 +363,7 @@ def writeListingLine(listing, t, digest, size, f):
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	return listing.write(t + " " + digest + " " + size_s + " " + utf8IfUnicode(f.path) + "\n")
+	return listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(f.path)]) + "\n")
 
 
 # Four possibilities here:
@@ -470,7 +477,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 					winfile.close(h)
 
 		digest = getWeirdHexdigest(listingChecksums)
-		writeListingLine(listing, "F", digest, f.getsize(), f)
+		writeListingLine(listing, "F", digest, f.getModificationTime(), f.getStatusChangeTime(), f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -513,13 +520,13 @@ def shouldDescend(verbose, f):
 def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	if winfile.isReparsePoint(f):
 		# Pretend all reparse points are "S" symlinks, even though they're not
-		writeListingLine(listing, "S", "-" * 32, None, f)
+		writeListingLine(listing, "S", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 	elif f.isfile():
 		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
 	elif f.isdir():
-		writeListingLine(listing, "D", "-" * 32, None, f)
+		writeListingLine(listing, "D", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 	else:
-		writeListingLine(listing, "O", "-" * 32, None, f)
+		writeListingLine(listing, "O", "-" * 32, f.getModificationTime(), f.getStatusChangeTime(), None, f)
 
 
 def getContentIfExists(f, maxRead):
