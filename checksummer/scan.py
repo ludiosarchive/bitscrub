@@ -372,7 +372,8 @@ def writeListingLine(listing, normalizeListing, baseDir, t, digest, mtime, ctime
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	return listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(p)]) + "\n")
+	listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(p)]) + "\n")
+	listing.flush()
 
 
 # Four possibilities here:
