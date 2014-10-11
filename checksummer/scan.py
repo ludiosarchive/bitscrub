@@ -444,8 +444,8 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing):
 		elif body is not None:
 			listingChecksums = body.checksums
 		else:
-			# We may not have existing checksums, nor done any
-			# verification, so read the file contents here if necessary.
+			# In this case, we don't have existing checksums,
+			# nor have we written any, so read the file to calculate them.
 			try:
 				h = winfile.open(f.path, reading=True, writing=False)
 			except winfile.OpenFailed:
