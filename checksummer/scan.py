@@ -474,12 +474,8 @@ def shouldDescend(verbose, f):
 
 def handlePath(f, verify, write, compress, inspect, verbose, listing):
 	if winfile.isReparsePoint(f):
-		# Both junctions and symlinks are considered symlinks here?
-		target = winfile.getSymlinkTarget(f)
-		assert isinstance(target, (unicode, types.NoneType)), type(target)
-		if target is None:
-			target = "?"
-		listing.write("S\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\t->\t" + utf8IfUnicode(target) + "\n")
+		# Pretend all reparse points are "S" symlinks, even though they're not
+		listing.write("S\t" + ("-" * 32) + "\t" + utf8IfUnicode(f.path) + "\n")
 	elif f.isfile():
 		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing)
 	elif f.isdir():

@@ -4,7 +4,7 @@ import datetime
 import ctypes
 import win32file
 import winnt
-from winioctlcon import FSCTL_SET_COMPRESSION, FSCTL_GET_REPARSE_POINT
+from winioctlcon import FSCTL_SET_COMPRESSION
 
 COMPRESSION_FORMAT_NONE = struct.pack('H', 0)
 COMPRESSION_FORMAT_DEFAULT = struct.pack('H', 1)
@@ -253,69 +253,6 @@ def setCreationAccessModificationTimeNanoseconds(h, c_ns, a_ns, m_ns):
 	if ret == 0:
 		raise SetMetadataFailed(
 			"Return code 0 from SetFileTime: %r" % (ctypes.GetLastError(),))
-
-
-# Copied from https://github.com/sid0/ntfs/blob/master/ntfsutils/junction.py
-
-# It is amazing how ugly MSDN's version of REPARSE_DATA_BUFFER is:
-# <http://msdn.microsoft.com/en-us/library/windows/hardware/ff552012>. It
-# is a variable-length struct with two strings in the wchar[] buffer at
-# the end. Both are supposed to be null-terminated, and the individual
-# lengths do not include that of the null character, but the total
-# ReparseDataLength does.
-#
-# In our case, only the SubstituteName part of the mount point/junction-
-# specific part is relevant. So we set PrintNameLength to 0, but we still
-# need to allow for one null character, so PrintNameBuffer has length 1.
-class REPARSE_DATA_BUFFER(ctypes.Structure):
-	_fields_ = [
-		("ReparseTag", ctypes.c_ulong),
-		("ReparseDataLength", ctypes.c_ushort),
-		("Reserved", ctypes.c_ushort),
-		("SubstituteNameOffset", ctypes.c_ushort),
-		("SubstituteNameLength", ctypes.c_ushort),
-		("PrintNameOffset", ctypes.c_ushort),
-		("PrintNameLength", ctypes.c_ushort),
-		("SubstituteNameBuffer", ctypes.c_wchar * 16384),
-		("PrintNameBuffer", ctypes.c_wchar * 1)
-	]
-
-IO_REPARSE_TAG_SYMLINK = 0xA000000C
-
-
-# Based on jaraco.windows.filesystem:readlink
-def readlink(link):
-	"""
-	readlink(link) -> target
-	Return a string representing the path to which the symbolic link points.
-	"""
-	handle = ctypes.windll.kernel32.CreateFileW(
-		link,
-		0,
-		0,
-		None,
-		win32file.OPEN_EXISTING,
-		win32file.FILE_FLAG_OPEN_REPARSE_POINT | win32file.FILE_FLAG_BACKUP_SEMANTICS,
-		None,
-		)
-
-	if handle == win32file.INVALID_HANDLE_VALUE:
-		raise OpenFailed("Couldn't open file %r" % (fname,))
-
-	res = win32file.DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, None, 10240)
-
-	bytes = ctypes.create_string_buffer(res)
-	p_rdb = ctypes.cast(bytes, ctypes.POINTER(REPARSE_DATA_BUFFER))
-	rdb = p_rdb.contents
-	#if not rdb.ReparseTag == IO_REPARSE_TAG_SYMLINK:
-	#	raise RuntimeError("Expected IO_REPARSE_TAG_SYMLINK, but got %d" % rdb.ReparseTag)
-
-	close(handle)
-	return rdb.SubstituteNameBuffer.decode("latin-1")
-
-
-def getSymlinkTarget(f):
-	return readlink(f.path)
 
 
 def isReparsePoint(f):
