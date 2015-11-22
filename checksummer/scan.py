@@ -72,7 +72,8 @@ else:
 _postImportVars = vars().keys()
 
 
-ADS_NAME = u"_M"
+ADS_NAME = u"_M" if os.name == 'nt' else "_M"
+ADS_COLON = u":" if os.name == 'nt' else ":"
 VERSION = chr(8)
 
 
@@ -133,16 +134,8 @@ class VolatileBody(tuple):
 		return VERSION + "\x01" + struct.pack("<d", self.timeMarked)
 
 
-
-class ADSOnlyOnWindows(Exception):
-	pass
-
-
-
 def getADSPath(f):
-	if os.name != 'nt':
-		raise ADSOnlyOnWindows()
-	return FilePath(f.path + u":" + ADS_NAME)
+	return FilePath(f.path + ADS_COLON + ADS_NAME)
 
 
 class UnreadableBody(Exception):
@@ -227,8 +220,7 @@ def getChecksums(h):
 
 def setChecksums(f, verbose):
 	if os.name != 'nt':
-		# LOL, go use ZFS
-		raise RuntimeError("Can't set checksums on non-Windows")
+		raise RuntimeError("Can't set checksums on non-Windows yet")
 
 	timeMarked = time.time()
 
@@ -243,7 +235,8 @@ def setChecksums(f, verbose):
 	except winfile.ReadFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 		return None
-	except winfile.SeekFailed:
+	except winfile.SeekFailed, e:
+		print repr(e)
 		writeToBothIfVerbose("NOSEEK\t%r" % (f.path,), verbose)
 		return None
 	finally:
@@ -395,12 +388,15 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 
 	try:
 		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
-	except (ADSOnlyOnWindows, winfile.OpenFailed):
+	except winfile.OpenFailed:
 		body = None
 	else:
 		try:
 			body = decodeBody(adsR, fileSize)
-			mtime = winfile.getModificationTimeNanoseconds(adsR)
+			if os.name == 'nt':
+				mtime = winfile.getModificationTimeNanoseconds(adsR)
+			else:
+				mtime = winfile.getModificationTimeNanoseconds(f.path)
 		except UnreadableBody:
 			body = None
 		finally:
@@ -646,6 +642,8 @@ def main():
 			p = winfile.upgradeFilepath(SortedListdirFilePath(fname.decode("ascii")))
 		else:
 			p = SortedListdirFilePath(fname)
+
+		print p
 
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):

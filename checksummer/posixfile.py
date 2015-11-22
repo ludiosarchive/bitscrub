@@ -1,5 +1,7 @@
 import os
 import sys
+import xattr
+import struct
 
 try:
 	from twisted.python.filepath import FilePath
@@ -58,6 +60,27 @@ def isReparsePoint(f):
 
 def parentEx(f):
 	return f.parent()
+
+
+def getCreationAccessModificationTimeNanoseconds(h):
+	# http://www.tuxera.com/community/ntfs-3g-advanced/extended-attributes/
+	crtime, mtime, atime, ctime = struct.unpack('<QQQQ', xattr.getxattr(h, 'system.ntfs_times'))
+	return (crtime, atime, mtime)
+
+
+def getCreationTimeNanoseconds(h):
+	ctime, _, _ = getCreationAccessModificationTimeNanoseconds(h)
+	return ctime
+
+
+def getAccessTimeNanoseconds(h):
+	_, atime, _ = getCreationAccessModificationTimeNanoseconds(h)
+	return atime
+
+
+def getModificationTimeNanoseconds(h):
+	_, _, mtime = getCreationAccessModificationTimeNanoseconds(h)
+	return mtime
 
 
 try:
