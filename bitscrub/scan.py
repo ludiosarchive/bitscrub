@@ -52,7 +52,7 @@ class ChecksumData(tuple):
 		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
 		mtime_str = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
 		return "<ChecksumData marked at %s when mtime was %s; checksum=%r>" % (
-			marked_str, mtime_str, self.checksum)
+			marked_str, mtime_str, format(self.checksum, '08X'))
 
 
 	def encode(self):
@@ -191,7 +191,7 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, mtime,
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, checksum, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
+	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
 	listing.flush()
 
 
@@ -265,14 +265,14 @@ def verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normaliz
 				listing_checksum = None
 			else:
 				try:
-					checksum = crc32c_for_file(h)
+					listing_checksum = crc32c_for_file(h)
 				except OSError:
-					checksum = None
+					listing_checksum = None
 				finally:
 					h.close()
 
 		s = os.lstat(f.path)
-		write_listing_line(listing, normalize_listing, base_dir, "F", checksum, s.st_mtime, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, s.st_mtime, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -312,13 +312,13 @@ def should_descend(verbose, f):
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	s = os.lstat(f.path)
 	if os.path.islink(f.path):
-		write_listing_line(listing, normalize_listing, base_dir, "S", "-" * 32, s.st_mtime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "S", None, s.st_mtime, None, f)
 	elif f.isfile():
 		verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 	elif f.isdir():
-		write_listing_line(listing, normalize_listing, base_dir, "D", "-" * 32, s.st_mtime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", None, s.st_mtime, None, f)
 	else:
-		write_listing_line(listing, normalize_listing, base_dir, "O", "-" * 32, s.st_mtime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "O", None, s.st_mtime, None, f)
 
 
 def main():
