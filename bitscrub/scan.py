@@ -279,19 +279,13 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 	wrote_checksums = None
 	detected_corruption = False
 	try:
-		# Needed only for decode_body to work around an old bug
-		file_size = f.getsize()
-	except (OSError, IOError):
-		write_to_both_if_verbose("NOSTAT\t%r" % (f.path,), verbose)
-		return
-
-	try:
 		encoded_body = xattr.getxattr(f.path, XATTR_NAME)
 	except IOError:
 		body = None
 	else:
 		try:
 			body = decode_body(encoded_body)
+			mtime = os.stat(f.path).st_mtime
 		except UnreadableBody:
 			body = None
 
