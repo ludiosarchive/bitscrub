@@ -21,13 +21,15 @@ import datetime
 import functools
 import operator
 import argparse
-import hashlib
+from cffi import FFI
+ffi = FFI()
+from _crc32c.lib import sse4_crc32c
 import xattr
 from twisted.python.filepath import FilePath
 
 
 XATTR_NAME = "user._C"
-VERSION = chr(10)
+VERSION = chr(11)
 
 
 class ChecksumData(tuple):
@@ -36,10 +38,10 @@ class ChecksumData(tuple):
 
 	time_marked = property(operator.itemgetter(1))
 	mtime = property(operator.itemgetter(2))
-	checksums = property(operator.itemgetter(3))
+	checksum = property(operator.itemgetter(3))
 
-	def __new__(cls, time_marked, mtime, checksums):
-		return tuple.__new__(cls, (cls._MARKER, time_marked, mtime, checksums))
+	def __new__(cls, time_marked, mtime, checksum):
+		return tuple.__new__(cls, (cls._MARKER, time_marked, mtime, checksum))
 
 
 	def __repr__(self):
@@ -49,9 +51,8 @@ class ChecksumData(tuple):
 	def get_description(self):
 		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
 		mtime_str = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
-		checksums_hex = list(s.encode("hex") for s in self.checksums)
-		return "<ChecksumData marked at %s when mtime was %s; checksums=%r>" % (
-			marked_str, mtime_str, checksums_hex)
+		return "<ChecksumData marked at %s when mtime was %s; checksum=%r>" % (
+			marked_str, mtime_str, self.checksum)
 
 
 	def encode(self):
@@ -59,7 +60,7 @@ class ChecksumData(tuple):
 			VERSION +
 			struct.pack("<d", self.time_marked) +
 			struct.pack("<d", self.mtime) +
-			"".join(self.checksums))
+			struct.pack("<I", self.checksum))
 
 
 
@@ -81,61 +82,34 @@ def decode_body(body):
 	if not version_s:
 		raise UnreadableBody("Body is empty")
 	version = ord(version_s)
-	if version < 10:
+	if version < 11:
 		raise UnreadableBody("Can't read version %r" % (version,))
 	time_marked = struct.unpack("<d", body[pos:pos + 8])[0]
 	pos += 8
 	mtime = struct.unpack("<d", body[pos:pos + 8])[0]
 	pos += 8
-	checksums = []
+	checksum = struct.unpack("<I", body[pos:pos + 4])[0]
+	pos += 4
+	return ChecksumData(time_marked, mtime, checksum)
+
+
+block_size = 64*1024
+# We have single-threaded operation, so we can use the same block of memory
+mem = ffi.new('char[%d]' % block_size)
+arr = ffi.buffer(mem)
+
+def crc32c_for_file(f):
+	#assert block_size >= 1, "block_size must be >= 1, was %r" % (block_size,)
+	c = 0
 	while True:
-		c = body[pos:pos + 8]
-		pos += 8
-		assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
-		if not c:
+		num_bytes_read = f.readinto(arr)
+		if num_bytes_read == 0:
 			break
-		checksums.append(c)
-	return ChecksumData(time_marked, mtime, checksums)
+		c = sse4_crc32c(c, mem, num_bytes_read)
+	return c
 
 
-def _get_checksums(h, read_size, block_size):
-	"""
-	Yields an 8-byte hash for every `block_size` bytes in `h`.
-	Doesn't yield anything for an empty file.  Yields one hash for
-	a `block_size`-sized file.
-	"""
-	if block_size % read_size != 0:
-		raise ValueError("block_size must be divisible by read_size; "
-			"arguments were read_size=%r, block_size=%r)" % (read_size, block_size))
-
-	h.seek(0)
-	pos = 0
-	m = hashlib.md5()
-	block_in_progress = False
-	while True:
-		data = h.read(read_size)
-		pos += len(data)
-		if not data:
-			if block_in_progress:
-				yield m.digest()[:8]
-			break
-		m.update(data)
-		if len(data) < read_size:
-			yield m.digest()[:8]
-			break
-		elif pos % block_size == 0:
-			yield m.digest()[:8]
-			m = hashlib.md5()
-			block_in_progress = False
-		else:
-			block_in_progress = True
-
-
-def get_checksums(h):
-	return list(_get_checksums(h, read_size=32*1024, block_size=32*1024*1024))
-
-
-def set_checksums(f, verbose):
+def set_checksum(f, verbose):
 	time_marked = time.time()
 
 	try:
@@ -146,14 +120,14 @@ def set_checksums(f, verbose):
 		return None
 	fstat = os.stat(f.path)
 	try:
-		checksums = get_checksums(h)
+		checksum = crc32c_for_file(h)
 		mtime = fstat.st_mtime
 	except OSError:
 		write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 		return None
 	finally:
 		h.close()
-	cd = ChecksumData(time_marked, mtime, checksums)
+	cd = ChecksumData(time_marked, mtime, checksum)
 
 	mode = fstat.st_mode
 	was_read_only = not mode & stat.S_IWRITE
@@ -163,11 +137,11 @@ def set_checksums(f, verbose):
 			os.chmod(f.path, mode | stat.S_IWRITE)
 		except OSError:
 			write_to_both_if_verbose("NOCHMOD\t%r" % (f.path,), verbose)
-			return checksums
+			return checksum
 	xattr.setxattr(f.path, XATTR_NAME, cd.encode())
 	if was_read_only:
 		os.chmod(f.path, mode)
-	return checksums
+	return checksum
 
 
 def write_to_both_if_verbose(msg, verbose):
@@ -188,21 +162,11 @@ def write_to_stderr(msg):
 	sys.stderr.flush()
 
 
-def set_checksums_or_print_message(f, verbose):
+def set_checksum_or_print_message(f, verbose):
 	try:
-		return set_checksums(f, verbose)
+		return set_checksum(f, verbose)
 	except OSError:
 		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
-
-
-def get_weird_hexdigest(checksums):
-	if checksums is None:
-		return '?' * 32
-	else:
-		m = hashlib.md5()
-		for c in checksums:
-			m.update(c)
-		return m.hexdigest()
 
 
 def time2iso(t):
@@ -212,7 +176,7 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, size, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, checksum, mtime, size, f):
 	if listing is None:
 		return
 
@@ -227,7 +191,7 @@ def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, s
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, digest, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
+	listing.write(" ".join([t, checksum, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
 	listing.flush()
 
 
@@ -237,8 +201,8 @@ def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, s
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
-def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
-	wrote_checksums = None
+def verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
+	wrote_checksum = None
 	detected_corruption = False
 	try:
 		encoded_body = xattr.getxattr(f.path, XATTR_NAME)
@@ -258,15 +222,15 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 		if verbose:
 			write_to_stderr("NEW\t%r" % (f.path,))
 		if write:
-			wrote_checksums = set_checksums_or_print_message(f, verbose)
+			wrote_checksum = set_checksum_or_print_message(f, verbose)
 	else:
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
 			write_to_both_if_verbose("MODIFIED\t%r" % (f.path,), verbose)
 			if write:
-				# Existing checksums are probably obsolete, so just
-				# set new checksums.
-				set_checksums_or_print_message(f, verbose)
+				# Existing checksum is probably obsolete, so just
+				# set new checksum.
+				set_checksum_or_print_message(f, verbose)
 		elif verify:
 			try:
 				h = open(f.path, 'rb')
@@ -274,11 +238,11 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 				write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 			else:
 				try:
-					checksums = get_checksums(h)
+					checksum = crc32c_for_file(h)
 				except OSError:
 					write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 				else:
-					if checksums != body.checksums:
+					if checksum != body.checksum:
 						detected_corruption = True
 						write_to_both_if_verbose("CORRUPT\t%r" % (f.path,), verbose)
 					else:
@@ -288,28 +252,27 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 					h.close()
 
 	if listing:
-		if wrote_checksums is not None:
-			listing_checksums = wrote_checksums
+		if wrote_checksum is not None:
+			listing_checksum = wrote_checksum
 		elif body is not None:
-			listing_checksums = body.checksums
+			listing_checksum = body.checksum
 		else:
-			# In this case, we don't have existing checksums,
-			# nor have we written any, so read the file to calculate them.
+			# In this case, we don't have an existing checksum,
+			# nor have we written one, so read the file to calculate it.
 			try:
 				h = open(f.path, 'rb')
 			except OSError:
-				listing_checksums = None
+				listing_checksum = None
 			else:
 				try:
-					listing_checksums = get_checksums(h)
+					checksum = crc32c_for_file(h)
 				except OSError:
-					listing_checksums = None
+					checksum = None
 				finally:
 					h.close()
 
-		digest = get_weird_hexdigest(listing_checksums)
 		s = os.lstat(f.path)
-		write_listing_line(listing, normalize_listing, base_dir, "F", digest, s.st_mtime, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", checksum, s.st_mtime, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -340,7 +303,7 @@ def should_descend(verbose, f):
 		return False
 	try:
 		os.listdir(f.path)
-	except OSError: # A "Permission denied" WindowsError, usually
+	except OSError: # A "Permission denied" error, usually
 		write_to_both_if_verbose("NOLISTDIR\t%r" % (f.path,), verbose)
 		return False
 	return True
@@ -351,7 +314,7 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 	if os.path.islink(f.path):
 		write_listing_line(listing, normalize_listing, base_dir, "S", "-" * 32, s.st_mtime, None, f)
 	elif f.isfile():
-		verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+		verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 	elif f.isdir():
 		write_listing_line(listing, normalize_listing, base_dir, "D", "-" * 32, s.st_mtime, None, f)
 	else:
@@ -406,7 +369,7 @@ def main():
 
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(should_descend, args.verbose)):
-				assert isinstance(f, SortedListdirFilePath), type(f)
+				#assert isinstance(f, SortedListdirFilePath), type(f)
 				if f == p:
 					continue
 				handle_path(f, base_dir=p, **kwargs)
