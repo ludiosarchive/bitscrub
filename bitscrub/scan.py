@@ -34,7 +34,7 @@ _postImportVars = vars().keys()
 
 
 XATTR_NAME = "user._C"
-VERSION = chr(1)
+VERSION = chr(9)
 
 
 class StaticBody(tuple):
@@ -66,7 +66,7 @@ class StaticBody(tuple):
 			VERSION +
 			"\x00" +
 			struct.pack("<d", self.time_marked) +
-			struct.pack("<Q", self.mtime) +
+			struct.pack("<d", self.mtime) +
 			"".join(self.checksums))
 
 
@@ -105,29 +105,29 @@ def utf8_if_unicode(s_or_u):
 		return s_or_u
 
 
-def decode_body(h, fileSize):
-	winfile.seek(h, 0)
-	version_s = winfile.read(h, 1)
+def decode_body(body):
+	pos = 0
+	version_s = body[pos:pos + 1]
+	pos += 1
 	if not version_s:
 		raise UnreadableBody("Body is empty")
 	version = ord(version_s)
-	if version < 7:
+	if version < 9:
 		raise UnreadableBody("Can't read version %r" % (version,))
-	if version == 7:
-		# Version 7 had a bug that omitted a checksum for some files.
-		if fileSize % (1024*1024) == 0:
-			raise UnreadableBody("Can't read version %r for files "
-				"whose length is a multiple of 1024*1024" % (version,))
-	volatileStr = winfile.read(h, 1)
-	if not volatileStr:
-		raise UnreadableBody("Truncated ADS?")
-	isVolatile = bool(ord(volatileStr))
-	time_marked = struct.unpack("<d", winfile.read(h, 8))[0]
-	mtime = struct.unpack("<Q", winfile.read(h, 8))[0]
-	if not isVolatile:
+	volatile_str = body[pos:pos + 1]
+	pos += 1
+	if not volatile_str:
+		raise UnreadableBody("Truncated xattr value?")
+	is_volatile = bool(ord(volatile_str))
+	time_marked = struct.unpack("<d", body[pos:pos + 8])[0]
+	pos += 8
+	mtime = struct.unpack("<d", body[pos:pos + 8])[0]
+	pos += 8
+	if not is_volatile:
 		checksums = []
 		while True:
-			c = winfile.read(h, 8)
+			c = body[pos:pos + 8]
+			pos += 8
 			assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
 			if not c:
 				break
@@ -147,12 +147,12 @@ def _get_checksums(h, read_size, block_size):
 		raise ValueError("block_size must be divisible by read_size; "
 			"arguments were read_size=%r, block_size=%r)" % (read_size, block_size))
 
-	winfile.seek(h, 0)
+	h.seek(0)
 	pos = 0
 	m = hashlib.md5()
 	block_in_progress = False
 	while True:
-		data = winfile.read(h, read_size)
+		data = h.read(read_size)
 		pos += len(data)
 		if not data:
 			if block_in_progress:
@@ -182,9 +182,10 @@ def set_checksums(f, verbose):
 	except OSError:
 		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		return None
+	fstat = os.stat(f.path)
 	try:
 		checksums = get_checksums(h)
-		mtime = winfile.getModificationTimeNanoseconds(h)
+		mtime = fstat.st_mtime
 	except OSError:
 		write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 		return None
@@ -192,7 +193,7 @@ def set_checksums(f, verbose):
 		h.close()
 	sb = StaticBody(time_marked, mtime, checksums)
 
-	mode = os.stat(f.path).st_mode
+	mode = fstat.st_mode
 	was_read_only = not mode & stat.S_IWRITE
 	if was_read_only:
 		# We need to unset the read-only flag before we can write a xattr
@@ -215,12 +216,12 @@ def write_to_both_if_verbose(msg, verbose):
 		sys.stderr.flush()
 
 
-def writeToStdout(msg):
+def write_to_stdout(msg):
 	sys.stdout.write(msg + "\n")
 	sys.stdout.flush()
 
 
-def writeToStderr(msg):
+def write_to_stderr(msg):
 	sys.stderr.write(msg + "\n")
 	sys.stderr.flush()
 
@@ -273,38 +274,33 @@ def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, s
 # verify=True, write=False -> verify checksums for non-modified files
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
-# + compress/decompress as needed
 
 def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksums = None
-	detectedCorruption = False
+	detected_corruption = False
 	try:
 		# Needed only for decode_body to work around an old bug
-		fileSize = f.getsize()
+		file_size = f.getsize()
 	except (OSError, IOError):
 		write_to_both_if_verbose("NOSTAT\t%r" % (f.path,), verbose)
 		return
 
-	body = xattr.getxattr(f.path, XATTR_NAME)
 	try:
-		adsR = xattr.open(getADSPath(f).path, reading=True, writing=False)
+		encoded_body = xattr.getxattr(f.path, XATTR_NAME)
 	except IOError:
 		body = None
 	else:
 		try:
-			body = decode_body(adsR, fileSize)
-			mtime = os.stat(f.path).st_mtime
+			body = decode_body(encoded_body)
 		except UnreadableBody:
 			body = None
-		finally:
-			winfile.close(adsR)
 
 	if inspect:
-		writeToStdout("INSPECT\t%r" % (f.path,))
-		writeToStdout("#\t%s" % (body.get_description() if body else repr(body),))
+		write_to_stdout("INSPECT\t%r" % (f.path,))
+		write_to_stdout("#\t%s" % (body.get_description() if body else repr(body),))
 	if body is None:
 		if verbose:
-			writeToStderr("NEW\t%r" % (f.path,))
+			write_to_stderr("NEW\t%r" % (f.path,))
 		if write:
 			wrote_checksums = set_checksums_or_print_message(f, verbose)
 	elif isinstance(body, StaticBody):
@@ -317,7 +313,7 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 				set_checksums_or_print_message(f, verbose)
 		elif verify:
 			try:
-				h = winfile.open(f.path, reading=True, writing=False)
+				h = open(f.path, 'rb')
 			except OSError:
 				write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 			else:
@@ -327,37 +323,14 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 					write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 				else:
 					if checksums != body.checksums:
-						detectedCorruption = True
+						detected_corruption = True
 						write_to_both_if_verbose("CORRUPT\t%r" % (f.path,), verbose)
 					else:
 						if verbose:
-							writeToStderr("VERIFIED\t%r" % (f.path,))
+							write_to_stderr("VERIFIED\t%r" % (f.path,))
 				finally:
 					h.close()
-
 	# for VolatileBody, do nothing
-
-	if compress and not detectedCorruption:
-		if os.name != 'nt':
-			raise RuntimeError("Can't compress on non-Windows")
-		expectedComp = expectedCompressionState(f)
-		if expectedComp != "AS_IS":
-			currentComp = {True: "COMPRESSED", False: "DECOMPRESSED"}[winfile.isCompressed(f.path)]
-			if currentComp != expectedComp:
-				try:
-					h = winfile.open(f.path, reading=True, writing=True)
-				except OSError:
-					write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
-				else:
-					try:
-						if expectedComp == "COMPRESSED":
-							winfile.compress(h)
-						elif expectedComp == "DECOMPRESSED":
-							winfile.decompress(h)
-						if verbose:
-							writeToStderr("%s\t%r" % (expectedComp, f.path))
-					finally:
-						h.close()
 
 	if listing:
 		if wrote_checksums is not None:
@@ -368,7 +341,7 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 			# In this case, we don't have existing checksums,
 			# nor have we written any, so read the file to calculate them.
 			try:
-				h = winfile.open(f.path, reading=True, writing=False)
+				h = open(f.path, 'rb')
 			except OSError:
 				listing_checksums = None
 			else:
@@ -406,9 +379,6 @@ SortedListdirFilePath.clonePath = SortedListdirFilePath
 def should_descend(verbose, f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
-		return False
-	excludes = get_excludes_for_directory(winfile.parentEx(f))
-	if f.basename() in excludes:
 		return False
 	# Don't descend symlinks
 	if os.path.islink(f.path):
@@ -465,7 +435,6 @@ def main():
 		write=args.write,
 		inspect=args.inspect,
 		verbose=args.verbose,
-		compress=args.compress,
 		normalize_listing=args.normalize_listing,
 		listing=open(args.listing, "wb") if args.listing else None
 	)
