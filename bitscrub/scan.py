@@ -27,10 +27,10 @@ from twisted.python.filepath import FilePath
 
 
 XATTR_NAME = "user._C"
-VERSION = chr(9)
+VERSION = chr(10)
 
 
-class StaticBody(tuple):
+class ChecksumData(tuple):
 	__slots__ = ()
 	_MARKER = object()
 
@@ -50,41 +50,17 @@ class StaticBody(tuple):
 		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
 		mtime_str = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
 		checksums_hex = list(s.encode("hex") for s in self.checksums)
-		return "<StaticBody marked at %s when mtime was %s; checksums=%r>" % (
+		return "<ChecksumData marked at %s when mtime was %s; checksums=%r>" % (
 			marked_str, mtime_str, checksums_hex)
 
 
 	def encode(self):
 		return (
 			VERSION +
-			"\x00" +
 			struct.pack("<d", self.time_marked) +
 			struct.pack("<d", self.mtime) +
 			"".join(self.checksums))
 
-
-
-class VolatileBody(tuple):
-	__slots__ = ()
-	_MARKER = object()
-
-	time_marked = property(operator.itemgetter(1))
-
-	def __new__(cls, time_marked):
-		return tuple.__new__(cls, (cls._MARKER, time_marked))
-
-
-	def __repr__(self):
-		return '%s(%r)' % (self.__class__.__name__, self[1])
-
-
-	def get_description(self):
-		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
-		return "<VolatileBody marked at %s>" % (marked_str,)
-
-
-	def encode(self):
-		return VERSION + "\x01" + struct.pack("<d", self.time_marked)
 
 
 class UnreadableBody(Exception):
@@ -105,29 +81,21 @@ def decode_body(body):
 	if not version_s:
 		raise UnreadableBody("Body is empty")
 	version = ord(version_s)
-	if version < 9:
+	if version < 10:
 		raise UnreadableBody("Can't read version %r" % (version,))
-	volatile_str = body[pos:pos + 1]
-	pos += 1
-	if not volatile_str:
-		raise UnreadableBody("Truncated xattr value?")
-	is_volatile = bool(ord(volatile_str))
 	time_marked = struct.unpack("<d", body[pos:pos + 8])[0]
 	pos += 8
 	mtime = struct.unpack("<d", body[pos:pos + 8])[0]
 	pos += 8
-	if not is_volatile:
-		checksums = []
-		while True:
-			c = body[pos:pos + 8]
-			pos += 8
-			assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
-			if not c:
-				break
-			checksums.append(c)
-		return StaticBody(time_marked, mtime, checksums)
-	else:
-		return VolatileBody(time_marked)
+	checksums = []
+	while True:
+		c = body[pos:pos + 8]
+		pos += 8
+		assert len(c) in (0, 8), "Got %d bytes instead of expected 0 or 8: %r" % (len(c), c)
+		if not c:
+			break
+		checksums.append(c)
+	return ChecksumData(time_marked, mtime, checksums)
 
 
 def _get_checksums(h, read_size, block_size):
@@ -185,7 +153,7 @@ def set_checksums(f, verbose):
 		return None
 	finally:
 		h.close()
-	sb = StaticBody(time_marked, mtime, checksums)
+	cd = ChecksumData(time_marked, mtime, checksums)
 
 	mode = fstat.st_mode
 	was_read_only = not mode & stat.S_IWRITE
@@ -196,7 +164,7 @@ def set_checksums(f, verbose):
 		except OSError:
 			write_to_both_if_verbose("NOCHMOD\t%r" % (f.path,), verbose)
 			return checksums
-	xattr.setxattr(f.path, XATTR_NAME, sb.encode())
+	xattr.setxattr(f.path, XATTR_NAME, cd.encode())
 	if was_read_only:
 		os.chmod(f.path, mode)
 	return checksums
@@ -291,7 +259,7 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 			write_to_stderr("NEW\t%r" % (f.path,))
 		if write:
 			wrote_checksums = set_checksums_or_print_message(f, verbose)
-	elif isinstance(body, StaticBody):
+	else:
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
 			write_to_both_if_verbose("MODIFIED\t%r" % (f.path,), verbose)
@@ -318,7 +286,6 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 							write_to_stderr("VERIFIED\t%r" % (f.path,))
 				finally:
 					h.close()
-	# for VolatileBody, do nothing
 
 	if listing:
 		if wrote_checksums is not None:
