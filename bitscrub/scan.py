@@ -13,7 +13,6 @@ TODO:
 """
 
 import os
-import types
 import stat
 import sys
 import struct
@@ -24,13 +23,7 @@ import operator
 import argparse
 import hashlib
 import xattr
-
-try:
-	from twisted.python.filepath import FilePath
-except ImportError:
-	from filepath import FilePath
-
-_postImportVars = vars().keys()
+from twisted.python.filepath import FilePath
 
 
 XATTR_NAME = "user._C"
@@ -179,7 +172,8 @@ def set_checksums(f, verbose):
 
 	try:
 		h = open(f.path, 'rb')
-	except OSError:
+	except (OSError, IOError):
+		# IOError raised if we have no permission
 		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		return None
 	fstat = os.stat(f.path)
@@ -454,15 +448,6 @@ def main():
 			handle_path(f, base_dir=p, **kwargs)
 
 	write_to_both_if_verbose("FINISHED", args.verbose)
-
-
-try:
-	from refbinder.api import bindRecursive, enableBinders
-except ImportError:
-	pass
-else:
-	enableBinders()
-	bindRecursive(sys.modules[__name__], _postImportVars + ["SortedListdirFilePath"])
 
 
 if __name__ == '__main__':
