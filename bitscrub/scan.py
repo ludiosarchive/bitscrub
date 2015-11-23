@@ -340,7 +340,7 @@ def main():
 	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
-		default=True, help="don't print important and unimportant messages to stderr")
+		default=True, help="don't print both important and unimportant messages to stderr; still print important messages to stdout")
 	parser.add_argument('-l', '--listing', dest='listing',
 		default=None, help="generate a file listing into this file (columns: "
 			"dentry type, CRC32C, mtime, size, filename)")
