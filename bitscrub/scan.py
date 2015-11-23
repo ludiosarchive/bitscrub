@@ -64,17 +64,11 @@ try:
 except ImportError:
 	from filepath import FilePath
 
-if os.name == 'nt':
-	from checksummer import winfile
-else:
-	from checksummer import posixfile as winfile
-
 _postImportVars = vars().keys()
 
 
-ADS_NAME = u"_M" if os.name == 'nt' else "_M"
-ADS_COLON = u":" if os.name == 'nt' else ":"
-VERSION = chr(8)
+XATTR_NAME = "_C"
+VERSION = chr(1)
 
 
 class StaticBody(tuple):
@@ -93,7 +87,7 @@ class StaticBody(tuple):
 		return '%s(%r, %r, %r)' % (self.__class__.__name__, self[1], self[2], self[3])
 
 
-	def getDescription(self):
+	def get_description(self):
 		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
 		mtimeDate = winfile.winTimeToDatetime(self.mtime)
 		checksumsHex = list(s.encode("hex") for s in self.checksums)
@@ -125,7 +119,7 @@ class VolatileBody(tuple):
 		return '%s(%r)' % (self.__class__.__name__, self[1])
 
 
-	def getDescription(self):
+	def get_description(self):
 		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
 		return "<VolatileBody marked at %s>" % (markedStr,)
 
@@ -142,14 +136,14 @@ class UnreadableBody(Exception):
 	pass
 
 
-def utf8IfUnicode(sOrU):
-	if isinstance(sOrU, unicode):
-		return sOrU.encode("utf-8")
+def utf8_if_unicode(s_or_u):
+	if isinstance(s_or_u, unicode):
+		return s_or_u.encode("utf-8")
 	else:
-		return sOrU
+		return s_or_u
 
 
-def decodeBody(h, fileSize):
+def decode_body(h, fileSize):
 	winfile.seek(h, 0)
 	version_s = winfile.read(h, 1)
 	if not version_s:
@@ -181,7 +175,7 @@ def decodeBody(h, fileSize):
 		return VolatileBody(timeMarked)
 
 
-def _getChecksums(h, readSize, blockSize):
+def _get_checksums(h, readSize, blockSize):
 	"""
 	Yields an 8-byte hash for every `blockSize` bytes in `h`.
 	Doesn't yield anything for an empty file.  Yields one hash for
@@ -214,14 +208,11 @@ def _getChecksums(h, readSize, blockSize):
 			blockInProgress = True
 
 
-def getChecksums(h):
-	return list(_getChecksums(h, readSize=32*1024, blockSize=32*1024*1024))
+def get_checksums(h):
+	return list(_get_checksums(h, readSize=32*1024, blockSize=32*1024*1024))
 
 
-def setChecksums(f, verbose):
-	if os.name != 'nt':
-		raise RuntimeError("Can't set checksums on non-Windows yet")
-
+def set_checksums(f, verbose):
 	timeMarked = time.time()
 
 	try:
@@ -230,7 +221,7 @@ def setChecksums(f, verbose):
 		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 		return None
 	try:
-		checksums = getChecksums(h)
+		checksums = get_checksums(h)
 		mtime = winfile.getModificationTimeNanoseconds(h)
 	except winfile.ReadFailed:
 		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
@@ -302,36 +293,16 @@ def writeToStderr(msg):
 	sys.stderr.flush()
 
 
-def setChecksumsOrPrintMessage(f, verbose):
+def set_checksums_or_print_message(f, verbose):
 	try:
-		return setChecksums(f, verbose)
+		return set_checksums(f, verbose)
 	except winfile.OpenFailed:
 		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 	except winfile.WriteFailed:
 		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
 
 
-highEntropyExtensions = """
-	jpeg jpg gif png psd zip zipx z gz bz2 7z xz rar deb rpm apk sitx pkg pptx docx xlsx
-	exe pdf epub mobi djvu mp3 mp4 avi m4a m4v mkv ogg webm wmv flac video flv
-	mov torrent par2""".split()
-lowEntropyExtensions = """
-	bmp txt log htm html shtml xhtml svg mht mhtml php cgi rss atom js css py pyc
-	pl rb hs el clj cljs c cpp cxx cs lua java sh patch diff ini ico jar tar ppt
-	doc xls rtf dll so pyd class o json xml srt csv feed comments nzb lst nfo rdf cdx""".split()
-
-def expectedCompressionState(f):
-	ext = f.basename().rsplit('.', 1)[-1].lower()
-	if ext in lowEntropyExtensions:
-		return "COMPRESSED"
-	elif ext in highEntropyExtensions:
-		# TODO: look at size-on-disk/file size and don't decompress files that have compressed well
-		return "DECOMPRESSED"
-	else:
-		return "AS_IS"
-
-
-def getWeirdHexdigest(checksums):
+def get_weird_hexdigest(checksums):
 	if checksums is None:
 		return '?' * 32
 	else:
@@ -348,24 +319,22 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def writeListingLine(listing, normalizeListing, baseDir, t, digest, mtime, ctime, size, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, ctime, size, f):
 	if listing is None:
 		return
 
 	p = f.path
-	if normalizeListing:
-		removeMe = baseDir.path + ("\\" if os.name == 'nt' else '/')
+	if normalize_listing:
+		removeMe = base_dir.path + '/'
 		assert p.startswith(removeMe), (p, removeMe)
 		p = p.replace(removeMe, "", 1)
 		assert len(p) < len(f.path), (p, f.path)
-		if os.name == 'nt':
-			p = p.replace("\\", "/")
 
 	if size is not None:
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8IfUnicode(p)]) + "\n")
+	listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8_if_unicode(p)]) + "\n")
 	listing.flush()
 
 
@@ -376,11 +345,11 @@ def writeListingLine(listing, normalizeListing, baseDir, t, digest, mtime, ctime
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 # + compress/decompress as needed
 
-def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir):
+def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wroteChecksums = None
 	detectedCorruption = False
 	try:
-		# Needed only for decodeBody to work around an old bug
+		# Needed only for decode_body to work around an old bug
 		fileSize = f.getsize()
 	except (OSError, IOError):
 		writeToBothIfVerbose("NOSTAT\t%r" % (f.path,), verbose)
@@ -392,11 +361,8 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 		body = None
 	else:
 		try:
-			body = decodeBody(adsR, fileSize)
-			if os.name == 'nt':
-				mtime = winfile.getModificationTimeNanoseconds(adsR)
-			else:
-				mtime = winfile.getModificationTimeNanoseconds(f.path)
+			body = decode_body(adsR, fileSize)
+			mtime = os.stat(f.path).st_mtime
 		except UnreadableBody:
 			body = None
 		finally:
@@ -404,12 +370,12 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 
 	if inspect:
 		writeToStdout("INSPECT\t%r" % (f.path,))
-		writeToStdout("#\t%s" % (body.getDescription() if body else repr(body),))
+		writeToStdout("#\t%s" % (body.get_description() if body else repr(body),))
 	if body is None:
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
 		if write:
-			wroteChecksums = setChecksumsOrPrintMessage(f, verbose)
+			wroteChecksums = set_checksums_or_print_message(f, verbose)
 	elif isinstance(body, StaticBody):
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
@@ -417,7 +383,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 			if write:
 				# Existing checksums are probably obsolete, so just
 				# set new checksums.
-				setChecksumsOrPrintMessage(f, verbose)
+				set_checksums_or_print_message(f, verbose)
 		elif verify:
 			try:
 				h = winfile.open(f.path, reading=True, writing=False)
@@ -425,7 +391,7 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 				writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
 			else:
 				try:
-					checksums = getChecksums(h)
+					checksums = get_checksums(h)
 				except winfile.ReadFailed:
 					writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
 				else:
@@ -476,15 +442,15 @@ def verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, 
 				listingChecksums = None
 			else:
 				try:
-					listingChecksums = getChecksums(h)
+					listingChecksums = get_checksums(h)
 				except winfile.ReadFailed:
 					listingChecksums = None
 				finally:
 					winfile.close(h)
 
-		digest = getWeirdHexdigest(listingChecksums)
+		digest = get_weird_hexdigest(listingChecksums)
 		s = os.lstat(f.path)
-		writeListingLine(listing, normalizeListing, baseDir, "F", digest, s.st_mtime, s.st_ctime, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", digest, s.st_mtime, s.st_ctime, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -506,11 +472,11 @@ class SortedListdirFilePath(FilePath):
 SortedListdirFilePath.clonePath = SortedListdirFilePath
 
 
-def shouldDescend(verbose, f):
+def should_descend(verbose, f):
 	# http://twistedmatrix.com/trac/ticket/5123
 	if not f.isdir():
 		return False
-	excludes = getExcludesForDirectory(winfile.parentEx(f))
+	excludes = get_excludes_for_directory(winfile.parentEx(f))
 	if f.basename() in excludes:
 		return False
 	# Don't descend any reparse points (symlinks are reparse points too).
@@ -524,20 +490,20 @@ def shouldDescend(verbose, f):
 	return True
 
 
-def handlePath(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir):
+def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	s = os.lstat(f.path)
 	if winfile.isReparsePoint(f):
 		# Pretend all reparse points are "S" symlinks, even though they're not
-		writeListingLine(listing, normalizeListing, baseDir, "S", "-" * 32, s.st_mtime, s.st_ctime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "S", "-" * 32, s.st_mtime, s.st_ctime, None, f)
 	elif f.isfile():
-		verifyOrSetChecksums(f, verify, write, compress, inspect, verbose, listing, normalizeListing, baseDir)
+		verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 	elif f.isdir():
-		writeListingLine(listing, normalizeListing, baseDir, "D", "-" * 32, s.st_mtime, s.st_ctime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", "-" * 32, s.st_mtime, s.st_ctime, None, f)
 	else:
-		writeListingLine(listing, normalizeListing, baseDir, "O", "-" * 32, s.st_mtime, s.st_ctime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "O", "-" * 32, s.st_mtime, s.st_ctime, None, f)
 
 
-def getContentIfExists(f, maxRead):
+def get_content_if_exists(f, maxRead):
 	try:
 		h = winfile.open(f.path, reading=True, writing=False)
 	except winfile.OpenFailed:
@@ -547,40 +513,6 @@ def getContentIfExists(f, maxRead):
 		# Above might raise exception if .read() fails for some reason
 	finally:
 		winfile.close(h)
-
-
-_lastExcludes = [None, None]
-
-def getExcludesForDirectory(p):
-	if p == _lastExcludes[0]:
-		return _lastExcludes[1]
-
-	bytes = getContentIfExists(p.child(".checksummer.json"), 2**16)
-	if bytes is None:
-		config = {}
-	else:
-		config = json.loads(bytes)
-		# Above might raise exception if JSON is invalid
-	excludes = set(config.get("excludes", []))
-
-	_lastExcludes[:] = [p, excludes]
-
-	return excludes
-
-
-def reducePriority():
-	"""
-	Set process priority to IDLE_PRIORITY_CLASS to reduce our CPU and IO priority.
-	"""
-	if os.name == 'nt':
-		import win32api
-		import win32con
-		import win32process
-		pid = win32api.GetCurrentProcessId()
-		handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
-		win32process.SetPriorityClass(handle, win32process.IDLE_PRIORITY_CLASS)
-	else:
-		os.nice(5)
 
 
 def main():
@@ -599,8 +531,6 @@ def main():
 	parser.add_argument('-w', '--write', dest='write', action='store_true',
 		help="calculate and write checksums for files that "
 			"have no checksum, or have an updated mtime")
-	parser.add_argument('-c', '--compress', dest='compress', action='store_true',
-		help="compress/decompress/do nothing based on probable file entropy")
 	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
@@ -608,8 +538,8 @@ def main():
 	parser.add_argument('-l', '--listing', dest='listing',
 		default=None, help="generate a file listing into this file (columns: "
 			"dentry type, Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
-	parser.add_argument('-n', '--normalize-listing', dest='normalizeListing', action='store_true',
-		default=False, help="print relative path and / instead of \\ in listing")
+	parser.add_argument('-n', '--normalize-listing', dest='normalize_listing', action='store_true',
+		default=False, help="print relative path")
 
 	args = parser.parse_args()
 	kwargs = dict(
@@ -618,46 +548,29 @@ def main():
 		inspect=args.inspect,
 		verbose=args.verbose,
 		compress=args.compress,
-		normalizeListing=args.normalizeListing,
+		normalize_listing=args.normalize_listing,
 		listing=open(args.listing, "wb") if args.listing else None
 	)
 
-	reducePriority()
+	os.nice(5)
 
-	if args.normalizeListing and len(args.path) > 1:
+	if args.normalize_listing and len(args.path) > 1:
 		raise RuntimeError("Can't print normalized listing because "
 			"more than one path was given: %r" % (args.path,))
 
 	for fname in args.path:
-		if os.name == 'nt':
-			# Must convert path like C: to C:\, because C: means "the
-			# current directory for the C:" drive.  And we must do this
-			# before turning it into a FilePath because FilePath will
-			# immediately turn C: into C:\some-path
-			if fname.endswith(":"):
-				fname += "\\"
-
-			# *must* use a unicode path because listdir'ing a `str` extended path
-			# raises WindowsError.
-			p = winfile.upgradeFilepath(SortedListdirFilePath(fname.decode("ascii")))
-		else:
-			p = SortedListdirFilePath(fname)
-
+		p = SortedListdirFilePath(fname)
 		print p
 
 		if p.isdir():
-			for f in p.walk(descend=functools.partial(shouldDescend, args.verbose)):
+			for f in p.walk(descend=functools.partial(should_descend, args.verbose)):
 				assert isinstance(f, SortedListdirFilePath), type(f)
-				excludes = getExcludesForDirectory(winfile.parentEx(f))
-				if f.basename() not in excludes:
-					if f == p:
-						continue
-					handlePath(f, baseDir=p, **kwargs)
+				if f == p:
+					continue
+				handle_path(f, base_dir=p, **kwargs)
 		else:
 			f = p
-			excludes = getExcludesForDirectory(winfile.parentEx(f))
-			if f.basename() not in excludes:
-				handlePath(f, baseDir=p, **kwargs)
+			handle_path(f, base_dir=p, **kwargs)
 
 	writeToBothIfVerbose("FINISHED", args.verbose)
 
