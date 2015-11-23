@@ -1,9 +1,7 @@
 #!/usr/bin/python
 
 """
-Checksummer reads and/or writes checksums of files in the files' ADS
-(alternate data stream).  Works only on NTFS partitions.
-
+bitscrub
 
 TODO:
 
@@ -12,35 +10,7 @@ TODO:
 
 *	Notice when the mtime changes while the file is being read, and do
 	something different.
-
-
-Implementation notes:
-
-Why do we use checksummer.winfile instead of the normall open()?  Because
-the normal open() doesn't enable FILE_SHARE_DELETE, so no one can
-delete the file when it's open.  This could mess up other programs as we
-scan almost all of the files on the disk.
-
-
-Some useful documentation for developers:
-
-How To Use NTFS Alternate Data Streams
-http://support.microsoft.com/kb/105763
-
-File Times
-http://msdn.microsoft.com/en-us/library/ms724290%28v=vs.85%29.aspx
-
-CreateFile
-http://msdn.microsoft.com/en-us/library/aa363858%28v=vs.85%29.aspx
-
-How To Use NTFS Alternate Data Streams
-http://support.microsoft.com/kb/105763
-
-File Streams
-http://msdn.microsoft.com/en-us/library/aa364404%28v=vs.85%29.aspx
 """
-
-from __future__ import with_statement
 
 import os
 import types
@@ -53,11 +23,7 @@ import functools
 import operator
 import argparse
 import hashlib
-
-try:
-	import simplejson as json
-except ImportError:
-	import json
+import xattr
 
 try:
 	from twisted.python.filepath import FilePath
@@ -67,7 +33,7 @@ except ImportError:
 _postImportVars = vars().keys()
 
 
-XATTR_NAME = "_C"
+XATTR_NAME = "user._C"
 VERSION = chr(1)
 
 
@@ -75,12 +41,12 @@ class StaticBody(tuple):
 	__slots__ = ()
 	_MARKER = object()
 
-	timeMarked = property(operator.itemgetter(1))
+	time_marked = property(operator.itemgetter(1))
 	mtime = property(operator.itemgetter(2))
 	checksums = property(operator.itemgetter(3))
 
-	def __new__(cls, timeMarked, mtime, checksums):
-		return tuple.__new__(cls, (cls._MARKER, timeMarked, mtime, checksums))
+	def __new__(cls, time_marked, mtime, checksums):
+		return tuple.__new__(cls, (cls._MARKER, time_marked, mtime, checksums))
 
 
 	def __repr__(self):
@@ -88,18 +54,18 @@ class StaticBody(tuple):
 
 
 	def get_description(self):
-		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
-		mtimeDate = winfile.winTimeToDatetime(self.mtime)
-		checksumsHex = list(s.encode("hex") for s in self.checksums)
+		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
+		mtime_str = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
+		checksums_hex = list(s.encode("hex") for s in self.checksums)
 		return "<StaticBody marked at %s when mtime was %s; checksums=%r>" % (
-			markedStr, mtimeDate.isoformat(), checksumsHex)
+			marked_str, mtime_str, checksums_hex)
 
 
 	def encode(self):
 		return (
 			VERSION +
 			"\x00" +
-			struct.pack("<d", self.timeMarked) +
+			struct.pack("<d", self.time_marked) +
 			struct.pack("<Q", self.mtime) +
 			"".join(self.checksums))
 
@@ -109,10 +75,10 @@ class VolatileBody(tuple):
 	__slots__ = ()
 	_MARKER = object()
 
-	timeMarked = property(operator.itemgetter(1))
+	time_marked = property(operator.itemgetter(1))
 
-	def __new__(cls, timeMarked):
-		return tuple.__new__(cls, (cls._MARKER, timeMarked))
+	def __new__(cls, time_marked):
+		return tuple.__new__(cls, (cls._MARKER, time_marked))
 
 
 	def __repr__(self):
@@ -120,16 +86,12 @@ class VolatileBody(tuple):
 
 
 	def get_description(self):
-		markedStr = datetime.datetime.utcfromtimestamp(self.timeMarked).isoformat()
-		return "<VolatileBody marked at %s>" % (markedStr,)
+		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
+		return "<VolatileBody marked at %s>" % (marked_str,)
 
 
 	def encode(self):
-		return VERSION + "\x01" + struct.pack("<d", self.timeMarked)
-
-
-def getADSPath(f):
-	return FilePath(f.path + ADS_COLON + ADS_NAME)
+		return VERSION + "\x01" + struct.pack("<d", self.time_marked)
 
 
 class UnreadableBody(Exception):
@@ -160,7 +122,7 @@ def decode_body(h, fileSize):
 	if not volatileStr:
 		raise UnreadableBody("Truncated ADS?")
 	isVolatile = bool(ord(volatileStr))
-	timeMarked = struct.unpack("<d", winfile.read(h, 8))[0]
+	time_marked = struct.unpack("<d", winfile.read(h, 8))[0]
 	mtime = struct.unpack("<Q", winfile.read(h, 8))[0]
 	if not isVolatile:
 		checksums = []
@@ -170,112 +132,82 @@ def decode_body(h, fileSize):
 			if not c:
 				break
 			checksums.append(c)
-		return StaticBody(timeMarked, mtime, checksums)
+		return StaticBody(time_marked, mtime, checksums)
 	else:
-		return VolatileBody(timeMarked)
+		return VolatileBody(time_marked)
 
 
-def _get_checksums(h, readSize, blockSize):
+def _get_checksums(h, read_size, block_size):
 	"""
-	Yields an 8-byte hash for every `blockSize` bytes in `h`.
+	Yields an 8-byte hash for every `block_size` bytes in `h`.
 	Doesn't yield anything for an empty file.  Yields one hash for
-	a `blockSize`-sized file.
+	a `block_size`-sized file.
 	"""
-	if blockSize % readSize != 0:
-		raise ValueError("blockSize must be divisible by readSize; "
-			"arguments were readSize=%r, blockSize=%r)" % (readSize, blockSize))
+	if block_size % read_size != 0:
+		raise ValueError("block_size must be divisible by read_size; "
+			"arguments were read_size=%r, block_size=%r)" % (read_size, block_size))
 
 	winfile.seek(h, 0)
 	pos = 0
 	m = hashlib.md5()
-	blockInProgress = False
+	block_in_progress = False
 	while True:
-		data = winfile.read(h, readSize)
+		data = winfile.read(h, read_size)
 		pos += len(data)
 		if not data:
-			if blockInProgress:
+			if block_in_progress:
 				yield m.digest()[:8]
 			break
 		m.update(data)
-		if len(data) < readSize:
+		if len(data) < read_size:
 			yield m.digest()[:8]
 			break
-		elif pos % blockSize == 0:
+		elif pos % block_size == 0:
 			yield m.digest()[:8]
 			m = hashlib.md5()
-			blockInProgress = False
+			block_in_progress = False
 		else:
-			blockInProgress = True
+			block_in_progress = True
 
 
 def get_checksums(h):
-	return list(_get_checksums(h, readSize=32*1024, blockSize=32*1024*1024))
+	return list(_get_checksums(h, read_size=32*1024, block_size=32*1024*1024))
 
 
 def set_checksums(f, verbose):
-	timeMarked = time.time()
+	time_marked = time.time()
 
 	try:
-		h = winfile.open(f.path, reading=True, writing=False)
-	except winfile.OpenFailed:
-		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
+		h = open(f.path, 'rb')
+	except OSError:
+		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		return None
 	try:
 		checksums = get_checksums(h)
 		mtime = winfile.getModificationTimeNanoseconds(h)
-	except winfile.ReadFailed:
-		writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
-		return None
-	except winfile.SeekFailed, e:
-		print repr(e)
-		writeToBothIfVerbose("NOSEEK\t%r" % (f.path,), verbose)
+	except OSError:
+		write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 		return None
 	finally:
-		winfile.close(h)
-	sb = StaticBody(timeMarked, mtime, checksums)
+		h.close()
+	sb = StaticBody(time_marked, mtime, checksums)
 
 	mode = os.stat(f.path).st_mode
-	wasReadOnly = not mode & stat.S_IWRITE
-	if wasReadOnly:
-		# Unset the read-only flag
+	was_read_only = not mode & stat.S_IWRITE
+	if was_read_only:
+		# We need to unset the read-only flag before we can write a xattr
 		try:
-			os.chmod(f.path, stat.S_IWRITE)
-		except WindowsError:
-			writeToBothIfVerbose("NOCHMOD\t%r" % (f.path,), verbose)
+			os.chmod(f.path, mode | stat.S_IWRITE)
+		except OSError:
+			write_to_both_if_verbose("NOCHMOD\t%r" % (f.path,), verbose)
 			return checksums
-	adsH = winfile.open(getADSPath(f).path, reading=False, writing=True,
-		creationDisposition=winfile.CREATE_ALWAYS)
-	try:
-		winfile.write(adsH, sb.encode())
-	finally:
-		# Get the handle again because in some cases (when the file is open
-		# in uTorrent?), the handle disappears and SetFileTime returns with
-		# error code 6.
-		winfile.close(adsH)
-		# We just wrote the ADS, so no need for CREATE_ALWAYS
-		adsH = winfile.open(getADSPath(f).path, reading=False, writing=True)
-
-		# Set the mtime back to what it was before the ADS was written.
-		# We set the mtime on the ADS instead of the file because it
-		# might be impossible to open the file with GENERIC_WRITE access
-		# if some program has the file open.  Note that timestamps are
-		# per-file, not per-stream.
-		#
-		# Note that if this program is killed during the write() above,
-		# the mtime and read-only flags may remain incorrect.
-		try:
-			winfile.setModificationTimeNanoseconds(adsH, mtime)
-		except winfile.SetMetadataFailed:
-			writeToStderr("Failed to set modification time on %r" % (f.path,))
-			raise
-		finally:
-			winfile.close(adsH)
-		if wasReadOnly:
-			os.chmod(f.path, stat.S_IREAD)
+	xattr.setxattr(f.path, XATTR_NAME, sb.encode())
+	if was_read_only:
+		os.chmod(f.path, mode)
 	return checksums
 
 
-def writeToBothIfVerbose(msg, verbose):
+def write_to_both_if_verbose(msg, verbose):
 	sys.stdout.write(msg + "\n")
 	sys.stdout.flush()
 	if verbose:
@@ -296,10 +228,8 @@ def writeToStderr(msg):
 def set_checksums_or_print_message(f, verbose):
 	try:
 		return set_checksums(f, verbose)
-	except winfile.OpenFailed:
-		writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
-	except winfile.WriteFailed:
-		writeToBothIfVerbose("NOWRITE\t%r" % (f.path,), verbose)
+	except OSError:
+		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 
 
 def get_weird_hexdigest(checksums):
@@ -319,22 +249,22 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, ctime, size, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, size, f):
 	if listing is None:
 		return
 
 	p = f.path
 	if normalize_listing:
-		removeMe = base_dir.path + '/'
-		assert p.startswith(removeMe), (p, removeMe)
-		p = p.replace(removeMe, "", 1)
+		remove_me = base_dir.path + '/'
+		assert p.startswith(remove_me), (p, remove_me)
+		p = p.replace(remove_me, "", 1)
 		assert len(p) < len(f.path), (p, f.path)
 
 	if size is not None:
 		size_s = "{:,d}".format(f.getsize()).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, digest, time2iso(mtime), time2iso(ctime), size_s, utf8_if_unicode(p)]) + "\n")
+	listing.write(" ".join([t, digest, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
 	listing.flush()
 
 
@@ -346,18 +276,19 @@ def write_listing_line(listing, normalize_listing, base_dir, t, digest, mtime, c
 # + compress/decompress as needed
 
 def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
-	wroteChecksums = None
+	wrote_checksums = None
 	detectedCorruption = False
 	try:
 		# Needed only for decode_body to work around an old bug
 		fileSize = f.getsize()
 	except (OSError, IOError):
-		writeToBothIfVerbose("NOSTAT\t%r" % (f.path,), verbose)
+		write_to_both_if_verbose("NOSTAT\t%r" % (f.path,), verbose)
 		return
 
+	body = xattr.getxattr(f.path, XATTR_NAME)
 	try:
-		adsR = winfile.open(getADSPath(f).path, reading=True, writing=False)
-	except winfile.OpenFailed:
+		adsR = xattr.open(getADSPath(f).path, reading=True, writing=False)
+	except IOError:
 		body = None
 	else:
 		try:
@@ -375,11 +306,11 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 		if verbose:
 			writeToStderr("NEW\t%r" % (f.path,))
 		if write:
-			wroteChecksums = set_checksums_or_print_message(f, verbose)
+			wrote_checksums = set_checksums_or_print_message(f, verbose)
 	elif isinstance(body, StaticBody):
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
-			writeToBothIfVerbose("MODIFIED\t%r" % (f.path,), verbose)
+			write_to_both_if_verbose("MODIFIED\t%r" % (f.path,), verbose)
 			if write:
 				# Existing checksums are probably obsolete, so just
 				# set new checksums.
@@ -387,22 +318,22 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 		elif verify:
 			try:
 				h = winfile.open(f.path, reading=True, writing=False)
-			except winfile.OpenFailed:
-				writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
+			except OSError:
+				write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 			else:
 				try:
 					checksums = get_checksums(h)
-				except winfile.ReadFailed:
-					writeToBothIfVerbose("NOREAD\t%r" % (f.path,), verbose)
+				except OSError:
+					write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
 				else:
 					if checksums != body.checksums:
 						detectedCorruption = True
-						writeToBothIfVerbose("CORRUPT\t%r" % (f.path,), verbose)
+						write_to_both_if_verbose("CORRUPT\t%r" % (f.path,), verbose)
 					else:
 						if verbose:
 							writeToStderr("VERIFIED\t%r" % (f.path,))
 				finally:
-					winfile.close(h)
+					h.close()
 
 	# for VolatileBody, do nothing
 
@@ -415,8 +346,8 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 			if currentComp != expectedComp:
 				try:
 					h = winfile.open(f.path, reading=True, writing=True)
-				except winfile.OpenFailed:
-					writeToBothIfVerbose("NOOPEN\t%r" % (f.path,), verbose)
+				except OSError:
+					write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 				else:
 					try:
 						if expectedComp == "COMPRESSED":
@@ -426,31 +357,31 @@ def verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normali
 						if verbose:
 							writeToStderr("%s\t%r" % (expectedComp, f.path))
 					finally:
-						winfile.close(h)
+						h.close()
 
 	if listing:
-		if wroteChecksums is not None:
-			listingChecksums = wroteChecksums
+		if wrote_checksums is not None:
+			listing_checksums = wrote_checksums
 		elif body is not None:
-			listingChecksums = body.checksums
+			listing_checksums = body.checksums
 		else:
 			# In this case, we don't have existing checksums,
 			# nor have we written any, so read the file to calculate them.
 			try:
 				h = winfile.open(f.path, reading=True, writing=False)
-			except winfile.OpenFailed:
-				listingChecksums = None
+			except OSError:
+				listing_checksums = None
 			else:
 				try:
-					listingChecksums = get_checksums(h)
-				except winfile.ReadFailed:
-					listingChecksums = None
+					listing_checksums = get_checksums(h)
+				except OSError:
+					listing_checksums = None
 				finally:
-					winfile.close(h)
+					h.close()
 
-		digest = get_weird_hexdigest(listingChecksums)
+		digest = get_weird_hexdigest(listing_checksums)
 		s = os.lstat(f.path)
-		write_listing_line(listing, normalize_listing, base_dir, "F", digest, s.st_mtime, s.st_ctime, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", digest, s.st_mtime, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -479,50 +410,37 @@ def should_descend(verbose, f):
 	excludes = get_excludes_for_directory(winfile.parentEx(f))
 	if f.basename() in excludes:
 		return False
-	# Don't descend any reparse points (symlinks are reparse points too).
-	if winfile.isReparsePoint(f):
+	# Don't descend symlinks
+	if os.path.islink(f.path):
 		return False
 	try:
 		os.listdir(f.path)
 	except OSError: # A "Permission denied" WindowsError, usually
-		writeToBothIfVerbose("NOLISTDIR\t%r" % (f.path,), verbose)
+		write_to_both_if_verbose("NOLISTDIR\t%r" % (f.path,), verbose)
 		return False
 	return True
 
 
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	s = os.lstat(f.path)
-	if winfile.isReparsePoint(f):
-		# Pretend all reparse points are "S" symlinks, even though they're not
-		write_listing_line(listing, normalize_listing, base_dir, "S", "-" * 32, s.st_mtime, s.st_ctime, None, f)
+	if os.path.islink(f.path):
+		write_listing_line(listing, normalize_listing, base_dir, "S", "-" * 32, s.st_mtime, None, f)
 	elif f.isfile():
 		verify_or_set_checksums(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 	elif f.isdir():
-		write_listing_line(listing, normalize_listing, base_dir, "D", "-" * 32, s.st_mtime, s.st_ctime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", "-" * 32, s.st_mtime, None, f)
 	else:
-		write_listing_line(listing, normalize_listing, base_dir, "O", "-" * 32, s.st_mtime, s.st_ctime, None, f)
-
-
-def get_content_if_exists(f, maxRead):
-	try:
-		h = winfile.open(f.path, reading=True, writing=False)
-	except winfile.OpenFailed:
-		return None
-	try:
-		return winfile.read(h, maxRead)
-		# Above might raise exception if .read() fails for some reason
-	finally:
-		winfile.close(h)
+		write_listing_line(listing, normalize_listing, base_dir, "O", "-" * 32, s.st_mtime, None, f)
 
 
 def main():
 	parser = argparse.ArgumentParser(description="""
-	Reads and/or writes checksums of files in the files' ADS (alternate data stream).
-	Works only on NTFS partitions.
+	Walks a directory tree and reads and/or writes the CRC32C of each file
+	to a xattr "%s".  Useful for detecting bitrot.
 
 	--verify, --write, and --inspect can be combined.  If none of these are
 	specified, files will be checked only for lack of checksum data or updated mtime.
-	""")
+	""" % (XATTR_NAME,))
 
 	parser.add_argument('path', metavar='PATH', type=str, nargs='+',
 		help="a file or directory")
@@ -537,7 +455,7 @@ def main():
 		default=True, help="don't print important and unimportant messages to stderr")
 	parser.add_argument('-l', '--listing', dest='listing',
 		default=None, help="generate a file listing into this file (columns: "
-			"dentry type, Checksummer-specific checksum, ISO mtime, ISO ctime, size, filename)")
+			"dentry type, CRC32C, mtime, size, filename)")
 	parser.add_argument('-n', '--normalize-listing', dest='normalize_listing', action='store_true',
 		default=False, help="print relative path")
 
@@ -572,7 +490,7 @@ def main():
 			f = p
 			handle_path(f, base_dir=p, **kwargs)
 
-	writeToBothIfVerbose("FINISHED", args.verbose)
+	write_to_both_if_verbose("FINISHED", args.verbose)
 
 
 try:
