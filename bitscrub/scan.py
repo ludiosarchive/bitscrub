@@ -276,7 +276,6 @@ BetterFilePath.clonePath = BetterFilePath
 
 
 def should_descend(verbose, f):
-	#print "should_descend", f, f.islink()
 	# Don't descend symlinks
 	if f.islink():
 		return False
