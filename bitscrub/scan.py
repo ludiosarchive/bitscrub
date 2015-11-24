@@ -108,24 +108,11 @@ def crc32c_for_file(h):
 	return c
 
 
-def set_checksum(f, verbose):
+def set_checksum(h, verbose):
 	time_marked = time.time()
-
-	try:
-		h = open(f.path, 'rb')
-	except (OSError, IOError):
-		# IOError raised if we have no permission
-		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
-		return None
 	fstat = os.fstat(h.fileno())
-	try:
-		checksum = crc32c_for_file(h)
-		mtime = fstat.st_mtime
-	except OSError:
-		write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
-		return None
-	finally:
-		h.close()
+	mtime = fstat.st_mtime
+	checksum = crc32c_for_file(h)
 	cd = ChecksumData(time_marked, mtime, checksum)
 
 	mode = fstat.st_mode
@@ -133,13 +120,13 @@ def set_checksum(f, verbose):
 	if was_read_only:
 		# We need to unset the read-only flag before we can write a xattr
 		try:
-			os.chmod(f.path, mode | stat.S_IWRITE)
+			os.fchmod(h.fileno(), mode | stat.S_IWRITE)
 		except OSError:
-			write_to_both_if_verbose("NOCHMOD\t%r" % (f.path,), verbose)
+			write_to_both_if_verbose("NOCHMOD\t%r" % (h.name,), verbose)
 			return checksum
-	xattr.setxattr(f.path, XATTR_NAME, cd.encode())
+	xattr._fsetxattr(h.fileno(), XATTR_NAME, cd.encode())
 	if was_read_only:
-		os.chmod(f.path, mode)
+		os.fchmod(h.fileno(), mode)
 	return checksum
 
 
@@ -161,13 +148,6 @@ def write_to_stderr(msg):
 	sys.stderr.flush()
 
 
-def set_checksum_or_print_message(f, verbose):
-	try:
-		return set_checksum(f, verbose)
-	except OSError:
-		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
-
-
 def time2iso(t):
 	s = datetime.datetime.utcfromtimestamp(t).isoformat()
 	if not "." in s:
@@ -175,11 +155,12 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def write_listing_line(listing, normalize_listing, base_dir, t, checksum, mtime, size, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, f):
 	if listing is None:
 		return
 
 	p = f.path
+	mtime = os.lstat(f.path)
 	if normalize_listing:
 		remove_me = base_dir.path + '/'
 		assert p.startswith(remove_me), (p, remove_me)
@@ -200,55 +181,42 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, mtime,
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
-def verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
+def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksum = None
-	detected_corruption = False
 	try:
-		encoded_body = xattr.getxattr(f.path, XATTR_NAME)
+		encoded_body = xattr._fgetxattr(h.fileno(), XATTR_NAME)
 	except IOError:
 		body = None
 	else:
 		try:
 			body = decode_body(encoded_body)
-			mtime = os.stat(f.path).st_mtime
+			mtime = os.stat(h.name).st_mtime
 		except UnreadableBody:
 			body = None
 
 	if inspect:
-		write_to_stdout("INSPECT\t%r" % (f.path,))
+		write_to_stdout("INSPECT\t%r" % (h.name,))
 		write_to_stdout("#\t%s" % (body.get_description() if body else repr(body),))
 	if body is None:
 		if verbose:
-			write_to_stderr("NEW\t%r" % (f.path,))
+			write_to_stderr("NEW\t%r" % (h.name,))
 		if write:
-			wrote_checksum = set_checksum_or_print_message(f, verbose)
+			wrote_checksum = set_checksum(h, verbose)
 	else:
 		##print repr(body.mtime), repr(mtime)
 		if body.mtime != mtime:
-			write_to_both_if_verbose("MODIFIED\t%r" % (f.path,), verbose)
+			write_to_both_if_verbose("MODIFIED\t%r" % (h.name,), verbose)
 			if write:
 				# Existing checksum is probably obsolete, so just
 				# set new checksum.
-				set_checksum_or_print_message(f, verbose)
+				set_checksum(h, verbose)
 		elif verify:
-			try:
-				h = open(f.path, 'rb')
-			except OSError:
-				write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
+			checksum = crc32c_for_file(h)
+			if checksum != body.checksum:
+				write_to_both_if_verbose("CORRUPT\t%r" % (h.name,), verbose)
 			else:
-				try:
-					checksum = crc32c_for_file(h)
-				except OSError:
-					write_to_both_if_verbose("NOREAD\t%r" % (f.path,), verbose)
-				else:
-					if checksum != body.checksum:
-						detected_corruption = True
-						write_to_both_if_verbose("CORRUPT\t%r" % (f.path,), verbose)
-					else:
-						if verbose:
-							write_to_stderr("VERIFIED\t%r" % (f.path,))
-				finally:
-					h.close()
+				if verbose:
+					write_to_stderr("VERIFIED\t%r" % (h.name,))
 
 	if listing:
 		if wrote_checksum is not None:
@@ -256,22 +224,11 @@ def verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normaliz
 		elif body is not None:
 			listing_checksum = body.checksum
 		else:
-			# In this case, we don't have an existing checksum,
-			# nor have we written one, so read the file to calculate it.
-			try:
-				h = open(f.path, 'rb')
-			except OSError:
-				listing_checksum = None
-			else:
-				try:
-					listing_checksum = crc32c_for_file(h)
-				except OSError:
-					listing_checksum = None
-				finally:
-					h.close()
+			# We don't have an existing checksum, nor did we just write one
+			listing_checksum = None
 
 		s = os.lstat(f.path)
-		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, s.st_mtime, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f.getsize(), f)
 
 
 class SortedListdirFilePath(FilePath):
@@ -303,15 +260,22 @@ def should_descend(verbose, f):
 
 
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
-	s = os.lstat(f.path)
-	if os.path.islink(f.path):
-		write_listing_line(listing, normalize_listing, base_dir, "S", None, s.st_mtime, None, f)
+	if f.islink():
+		write_listing_line(listing, normalize_listing, base_dir, "S", None, None, f)
 	elif f.isfile():
-		verify_or_set_checksum(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+		try:
+			h = open(f.path, 'rb')
+		except (OSError, IOError):
+			write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
+		else:
+			try:
+				verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+			finally:
+				h.close()
 	elif f.isdir():
-		write_listing_line(listing, normalize_listing, base_dir, "D", None, s.st_mtime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", None, None, f)
 	else:
-		write_listing_line(listing, normalize_listing, base_dir, "O", None, s.st_mtime, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "O", None, None, f)
 
 
 def main():
