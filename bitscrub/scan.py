@@ -117,7 +117,7 @@ def set_checksum(f, verbose):
 		# IOError raised if we have no permission
 		write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		return None
-	fstat = os.stat(f.path)
+	fstat = os.fstat(h.fileno())
 	try:
 		checksum = crc32c_for_file(h)
 		mtime = fstat.st_mtime
