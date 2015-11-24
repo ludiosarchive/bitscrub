@@ -281,13 +281,7 @@ class SortedListdirFilePath(FilePath):
 	"""
 	def listdir(self):
 		paths = os.listdir(self.path)
-		# We decode str to Unicode instead of the other way around
-		# to avoid potential UTF-8 normalization issues on POSIX.
-		# (Note: my POSIX systems use only well-formed UTF-8 filenames)
-		if paths and isinstance(paths[0], str):
-			paths.sort(key=lambda f: f.decode("utf-8"))
-		else:
-			paths.sort()
+		paths.sort()
 		return paths
 
 SortedListdirFilePath.clonePath = SortedListdirFilePath
