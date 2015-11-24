@@ -131,6 +131,8 @@ def set_checksum(h, verbose):
 		# else without giving us write permission.
 		assert "Permission denied" in repr(e)
 		write_to_both_if_verbose("NOWRITE\t%r" % (h.name,), verbose)
+		# Since we did not actually write a checksum
+		return None
 	finally:
 		if was_read_only:
 			os.fchmod(h.fileno(), mode)
@@ -223,7 +225,7 @@ def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normaliz
 			if write:
 				# Existing checksum is probably obsolete, so just
 				# set new checksum.
-				set_checksum(h, verbose)
+				wrote_checksum = set_checksum(h, verbose)
 		elif verify:
 			checksum = crc32c_for_file(h)
 			if checksum != body.checksum:
