@@ -25,7 +25,7 @@ from cffi import FFI
 ffi = FFI()
 from _crc32c.lib import sse4_crc32c
 import xattr
-from twisted.python.filepath import FilePath
+from twisted.python.filepath import FilePath, LinkError
 
 
 XATTR_NAME = "user._C"
@@ -238,28 +238,50 @@ def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normaliz
 		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f.getsize(), f)
 
 
-class SortedListdirFilePath(FilePath):
+class BetterFilePath(FilePath):
 	"""
-	Used to make sure we descend in the same order on different machines
-	that have the same copy of the data.
+	A FilePath that sorts the listdir() output to make make sure we descend in
+	the same order on different machines that have the same copy of the data.
+
+	Also includes a fixed walk().
 	"""
 	def listdir(self):
 		paths = os.listdir(self.path)
 		paths.sort()
 		return paths
 
-SortedListdirFilePath.clonePath = SortedListdirFilePath
+	def walk(self, descend=None):
+		"""
+		A less-busted walk() that calls descend on the FilePath itself before descending.
+
+		Also removes the broken cycle check that assumes there are cycles when
+		they would be stopped by a `descend` call.
+
+		Also avoids calling `descend` function on non-directories.
+		"""
+		yield self
+		if not self.isdir():
+			return
+		if descend is not None and not descend(self):
+			return
+		for c in self.children():
+			if c.isdir() and (descend is None or descend(c)):
+				for subc in c.walk(descend):
+					yield subc
+			else:
+				yield c
+
+
+BetterFilePath.clonePath = BetterFilePath
 
 
 def should_descend(verbose, f):
-	# http://twistedmatrix.com/trac/ticket/5123
-	if not f.isdir():
-		return False
+	#print "should_descend", f, f.islink()
 	# Don't descend symlinks
-	if os.path.islink(f.path):
+	if f.islink():
 		return False
 	try:
-		os.listdir(f.path)
+		f.listdir()
 	except OSError: # A "Permission denied" error, usually
 		write_to_both_if_verbose("NOLISTDIR\t%r" % (f.path,), verbose)
 		return False
@@ -328,12 +350,12 @@ def main():
 			"more than one path was given: %r" % (args.path,))
 
 	for fname in args.path:
-		p = SortedListdirFilePath(fname)
+		p = BetterFilePath(fname)
 		print p
 
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(should_descend, args.verbose)):
-				#assert isinstance(f, SortedListdirFilePath), type(f)
+				assert isinstance(f, BetterFilePath), type(f)
 				if f == p:
 					continue
 				handle_path(f, base_dir=p, **kwargs)
