@@ -175,6 +175,8 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 	listing.flush()
 
 
+seen_inodes = set()
+
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
 # verify=True, write=False -> verify checksums for non-modified files
@@ -183,14 +185,20 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 
 def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksum = None
+	fstat = os.fstat(h.fileno())
+	if fstat.st_ino in seen_inodes:
+		if verbose:
+			# No need to check inodes we've already checked
+			write_to_stderr("HARDLINK\t%r" % (h.name,))
+		return
+	seen_inodes.add(fstat.st_ino)
 	try:
 		encoded_body = xattr._fgetxattr(h.fileno(), XATTR_NAME)
-	except IOError:
+	except IOError: # raised if no xattr by that name
 		body = None
 	else:
 		try:
 			body = decode_body(encoded_body)
-			mtime = os.stat(h.name).st_mtime
 		except UnreadableBody:
 			body = None
 
@@ -203,8 +211,7 @@ def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normaliz
 		if write:
 			wrote_checksum = set_checksum(h, verbose)
 	else:
-		##print repr(body.mtime), repr(mtime)
-		if body.mtime != mtime:
+		if body.mtime != fstat.st_mtime:
 			write_to_both_if_verbose("MODIFIED\t%r" % (h.name,), verbose)
 			if write:
 				# Existing checksum is probably obsolete, so just
