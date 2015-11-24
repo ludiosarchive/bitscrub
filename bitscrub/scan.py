@@ -98,10 +98,10 @@ block_size = 64*1024
 mem = ffi.new('char[%d]' % block_size)
 arr = ffi.buffer(mem)
 
-def crc32c_for_file(f):
+def crc32c_for_file(h):
 	c = 0
 	while True:
-		num_bytes_read = f.readinto(arr)
+		num_bytes_read = h.readinto(arr)
 		if num_bytes_read == 0:
 			break
 		c = sse4_crc32c(c, mem, num_bytes_read)
