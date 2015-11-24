@@ -99,7 +99,6 @@ mem = ffi.new('char[%d]' % block_size)
 arr = ffi.buffer(mem)
 
 def crc32c_for_file(f):
-	#assert block_size >= 1, "block_size must be >= 1, was %r" % (block_size,)
 	c = 0
 	while True:
 		num_bytes_read = f.readinto(arr)
