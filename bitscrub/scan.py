@@ -124,9 +124,16 @@ def set_checksum(h, verbose):
 		except OSError:
 			write_to_both_if_verbose("NOCHMOD\t%r" % (h.name,), verbose)
 			return checksum
-	xattr._fsetxattr(h.fileno(), XATTR_NAME, cd.encode())
-	if was_read_only:
-		os.fchmod(h.fileno(), mode)
+	try:
+		xattr._fsetxattr(h.fileno(), XATTR_NAME, cd.encode())
+	except IOError as e:
+		# This will happen if the file was readable to us, but owned by someone
+		# else without giving us write permission.
+		assert "Permission denied" in repr(e)
+		write_to_both_if_verbose("NOWRITE\t%r" % (h.name,), verbose)
+	finally:
+		if was_read_only:
+			os.fchmod(h.fileno(), mode)
 	return checksum
 
 
