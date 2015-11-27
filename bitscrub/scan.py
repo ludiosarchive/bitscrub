@@ -157,12 +157,11 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def write_listing_line(listing, normalize_listing, base_dir, t, checksum, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, f):
 	if listing is None:
 		return
 
 	p = f.path
-	size = f.getsize()
 	if normalize_listing:
 		remove_me = base_dir.path + '/'
 		assert p.startswith(remove_me), (p, remove_me)
@@ -173,11 +172,10 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, f):
 		size_s = "{:,d}".format(size).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(f.getModificationTime()), size_s, p]) + "\n")
+	mtime = os.lstat(p).st_mtime
+	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(mtime), size_s, p]) + "\n")
 	listing.flush()
 
-
-seen_inodes = set()
 
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
@@ -185,15 +183,8 @@ seen_inodes = set()
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
-def verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
+def verify_or_set_checksum(h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksum = None
-	fstat = os.fstat(h.fileno())
-	if fstat.st_ino in seen_inodes:
-		if verbose:
-			# No need to check inodes we've already checked
-			write_to_stderr("HARDLINK\t%r" % (h.name,))
-		return
-	seen_inodes.add(fstat.st_ino)
 	try:
 		encoded_body = xattr._fgetxattr(h.fileno(), XATTR_NAME)
 	except IOError: # raised if no xattr by that name
@@ -227,18 +218,10 @@ def verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, norma
 				if verbose:
 					write_to_stderr("VERIFIED\t%r" % (h.name,))
 
-	if listing:
-		if wrote_checksum is not None:
-			listing_checksum = wrote_checksum
-		elif body is not None:
-			listing_checksum = body.checksum
-		else:
-			# We don't have an existing checksum, nor did we just write one, so
-			# calculate it just for the listing.
-			h.seek(0)
-			listing_checksum = crc32c_for_file(h)
-
-		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f)
+	if wrote_checksum is not None:
+		return wrote_checksum
+	elif body is not None:
+		return body.checksum
 
 
 class BetterFilePath(FilePath):
@@ -290,23 +273,46 @@ def should_descend(verbose, f):
 	return True
 
 
+inode_to_crc32c = {}
+
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	if f.islink():
-		write_listing_line(listing, normalize_listing, base_dir, "S", None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "S", None, None, f)
 	elif f.isfile():
+		checksum = None
+		size = None
+		h = None
 		try:
 			h = open(f.path, 'rb')
 		except (OSError, IOError):
 			write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		else:
-			try:
-				verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
-			finally:
-				h.close()
+			fstat = os.fstat(h.fileno())
+			size = fstat.st_size
+			if fstat.st_ino in inode_to_crc32c:
+				if verbose:
+					# No need to check inodes we've already checked
+					write_to_stderr("HARDLINK\t%r" % (h.name,))
+			else:
+				inode_to_crc32c[fstat.st_ino] = verify_or_set_checksum(
+					h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+
+		if h is not None:
+			if checksum is None:
+				# We don't have an existing checksum, nor did we just write one, so
+				# calculate it just for the listing.  Unless we already know what it is
+				# based on the inode.
+				checksum = inode_to_crc32c.get(fstat.st_ino)
+				##print "Existing checksum:", checksum
+				if checksum is None:
+					h.seek(0)
+					checksum = inode_to_crc32c[fstat.st_ino] = crc32c_for_file(h)
+			h.close()
+		write_listing_line(listing, normalize_listing, base_dir, "F", checksum, size, f)
 	elif f.isdir():
-		write_listing_line(listing, normalize_listing, base_dir, "D", None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", None, None, f)
 	else:
-		write_listing_line(listing, normalize_listing, base_dir, "O", None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "O", None, None, f)
 
 
 def main():
