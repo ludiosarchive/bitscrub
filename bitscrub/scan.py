@@ -298,15 +298,11 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 					h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 
 		if h is not None:
+			checksum = inode_to_crc32c.get(fstat.st_ino)
+			##print "Existing checksum:", checksum
 			if checksum is None:
-				# We don't have an existing checksum, nor did we just write one, so
-				# calculate it just for the listing.  Unless we already know what it is
-				# based on the inode.
-				checksum = inode_to_crc32c.get(fstat.st_ino)
-				##print "Existing checksum:", checksum
-				if checksum is None:
-					h.seek(0)
-					checksum = inode_to_crc32c[fstat.st_ino] = crc32c_for_file(h)
+				h.seek(0)
+				checksum = inode_to_crc32c[fstat.st_ino] = crc32c_for_file(h)
 			h.close()
 		write_listing_line(listing, normalize_listing, base_dir, "F", checksum, size, f)
 	elif f.isdir():
