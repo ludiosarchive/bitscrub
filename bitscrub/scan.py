@@ -233,12 +233,10 @@ def verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, norma
 		elif body is not None:
 			listing_checksum = body.checksum
 		else:
-			# We don't have an existing checksum, nor did we just write one, so calculate it.
-			try:
-				h.seek(0)
-				listing_checksum = crc32c_for_file(h)
-			except winfile.ReadFailed:
-				listing_checksum = None
+			# We don't have an existing checksum, nor did we just write one, so
+			# calculate it just for the listing.
+			h.seek(0)
+			listing_checksum = crc32c_for_file(h)
 
 		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f)
 
