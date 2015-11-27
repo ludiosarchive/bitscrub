@@ -68,13 +68,6 @@ class UnreadableBody(Exception):
 	pass
 
 
-def utf8_if_unicode(s_or_u):
-	if isinstance(s_or_u, unicode):
-		return s_or_u.encode("utf-8")
-	else:
-		return s_or_u
-
-
 def decode_body(body):
 	pos = 0
 	version_s = body[pos:pos + 1]
@@ -164,12 +157,12 @@ def time2iso(t):
 	return s.ljust(26, "0")
 
 
-def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, f):
+def write_listing_line(listing, normalize_listing, base_dir, t, checksum, f):
 	if listing is None:
 		return
 
 	p = f.path
-	mtime = os.lstat(f.path)
+	size = f.getsize()
 	if normalize_listing:
 		remove_me = base_dir.path + '/'
 		assert p.startswith(remove_me), (p, remove_me)
@@ -177,10 +170,10 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 		assert len(p) < len(f.path), (p, f.path)
 
 	if size is not None:
-		size_s = "{:,d}".format(f.getsize()).rjust(17)
+		size_s = "{:,d}".format(size).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(mtime), size_s, utf8_if_unicode(p)]) + "\n")
+	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(f.getModificationTime()), size_s, p]) + "\n")
 	listing.flush()
 
 
@@ -192,7 +185,7 @@ seen_inodes = set()
 # verify=True, write=True -> verify and write new checksums where needed
 # verify=False, write=True -> ignore existing checksums, write new checksums where needed
 
-def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
+def verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksum = None
 	fstat = os.fstat(h.fileno())
 	if fstat.st_ino in seen_inodes:
@@ -240,11 +233,14 @@ def verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normaliz
 		elif body is not None:
 			listing_checksum = body.checksum
 		else:
-			# We don't have an existing checksum, nor did we just write one
-			listing_checksum = None
+			# We don't have an existing checksum, nor did we just write one, so calculate it.
+			try:
+				h.seek(0)
+				listing_checksum = crc32c_for_file(h)
+			except winfile.ReadFailed:
+				listing_checksum = None
 
-		s = os.lstat(f.path)
-		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f.getsize(), f)
+		write_listing_line(listing, normalize_listing, base_dir, "F", listing_checksum, f)
 
 
 class BetterFilePath(FilePath):
@@ -298,7 +294,7 @@ def should_descend(verbose, f):
 
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	if f.islink():
-		write_listing_line(listing, normalize_listing, base_dir, "S", None, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "S", None, f)
 	elif f.isfile():
 		try:
 			h = open(f.path, 'rb')
@@ -306,13 +302,13 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 			write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		else:
 			try:
-				verify_or_set_checksum(h, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+				verify_or_set_checksum(h, f, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 			finally:
 				h.close()
 	elif f.isdir():
-		write_listing_line(listing, normalize_listing, base_dir, "D", None, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "D", None, f)
 	else:
-		write_listing_line(listing, normalize_listing, base_dir, "O", None, None, f)
+		write_listing_line(listing, normalize_listing, base_dir, "O", None, f)
 
 
 def main():
