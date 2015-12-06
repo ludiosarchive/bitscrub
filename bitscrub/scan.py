@@ -162,6 +162,7 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 		return
 
 	p = f.path
+	mtime = os.lstat(p).st_mtime
 	if normalize_listing:
 		remove_me = base_dir.path + '/'
 		assert p.startswith(remove_me), (p, remove_me)
@@ -172,7 +173,6 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 		size_s = "{:,d}".format(size).rjust(17)
 	else:
 		size_s = "-".rjust(17)
-	mtime = os.lstat(p).st_mtime
 	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(mtime), size_s, p]) + "\n")
 	listing.flush()
 
