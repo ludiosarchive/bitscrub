@@ -105,7 +105,12 @@ def set_checksum(h, verbose):
 	time_marked = time.time()
 	fstat = os.fstat(h.fileno())
 	mtime = fstat.st_mtime
-	checksum = crc32c_for_file(h)
+	try:
+		checksum = crc32c_for_file(h)
+	except IOError as e:
+		assert "Input/output error" in repr(e), repr(e)
+		write_to_both_if_verbose("IOERROR\t%r" % (h.name,), verbose)
+		return None
 	cd = ChecksumData(time_marked, mtime, checksum)
 
 	mode = fstat.st_mode
@@ -122,7 +127,7 @@ def set_checksum(h, verbose):
 	except IOError as e:
 		# This will happen if the file was readable to us, but owned by someone
 		# else without giving us write permission.
-		assert "Permission denied" in repr(e)
+		assert "Permission denied" in repr(e), repr(e)
 		write_to_both_if_verbose("NOWRITE\t%r" % (h.name,), verbose)
 		# Since we did not actually write a checksum
 		return None
