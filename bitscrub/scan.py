@@ -211,12 +211,16 @@ def verify_or_set_checksum(h, f, fstat, verify, write, inspect, verbose, listing
 				# set new checksum.
 				wrote_checksum = set_checksum(h, verbose)
 		elif verify:
-			checksum = crc32c_for_file(h)
-			if checksum != body.checksum:
-				write_to_both_if_verbose("CORRUPT\t%r" % (h.name,), verbose)
+			try:
+				checksum = crc32c_for_file(h)
+			except IOError:
+				write_to_both_if_verbose("IOERROR\t%r" % (h.name,), verbose)
 			else:
-				if verbose:
-					write_to_stderr("VERIFIED\t%r" % (h.name,))
+				if checksum != body.checksum:
+					write_to_both_if_verbose("CORRUPT\t%r" % (h.name,), verbose)
+				else:
+					if verbose:
+						write_to_stderr("VERIFIED\t%r" % (h.name,))
 
 	if wrote_checksum is not None:
 		return wrote_checksum
