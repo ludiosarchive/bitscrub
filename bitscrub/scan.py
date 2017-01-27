@@ -280,7 +280,7 @@ def should_descend(verbose, f):
 	return True
 
 
-# (st_dev, st_ino) -> crc32
+# (st_dev, st_ino) -> crc32c
 cached_crc32c = {}
 
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
