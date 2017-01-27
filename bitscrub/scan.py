@@ -103,8 +103,8 @@ def crc32c_for_file(h):
 
 def set_checksum(h, verbose):
 	time_marked = time.time()
-	fstat = os.fstat(h.fileno())
-	mtime = fstat.st_mtime
+	fstat       = os.fstat(h.fileno())
+	mtime       = fstat.st_mtime
 	try:
 		checksum = crc32c_for_file(h)
 	except IOError as e:
@@ -113,7 +113,7 @@ def set_checksum(h, verbose):
 		return None
 	cd = ChecksumData(time_marked, mtime, checksum)
 
-	mode = fstat.st_mode
+	mode          = fstat.st_mode
 	was_read_only = not mode & stat.S_IWRITE
 	if was_read_only:
 		# We need to unset the read-only flag before we can write a xattr
@@ -174,11 +174,9 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 		p = p.replace(remove_me, "", 1)
 		assert len(p) < len(f.path), (p, f.path)
 
-	if size is not None:
-		size_s = "{:,d}".format(size).rjust(17)
-	else:
-		size_s = "-".rjust(17)
-	listing.write(" ".join([t, format(checksum, '08X') if checksum is not None else '-' * 8, time2iso(mtime), size_s, p]) + "\n")
+	size_s     = "{:,d}".format(size).rjust(17) if size     is not None else "-".rjust(17)
+	checksum_s = "{:08X}".format(checksum)      if checksum is not None else '-' * 8
+	listing.write(" ".join([t, checksum_s, time2iso(mtime), size_s, p]) + "\n")
 	listing.flush()
 
 
