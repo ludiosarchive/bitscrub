@@ -182,9 +182,9 @@ def write_listing_line(listing, normalize_listing, base_dir, t, checksum, size, 
 
 # Four possibilities here:
 # verify=False, write=False -> just recurse and print NEW/NOOPEN/NOREAD/MODIFIED
-# verify=True, write=False -> verify checksums for non-modified files
-# verify=True, write=True -> verify and write new checksums where needed
-# verify=False, write=True -> ignore existing checksums, write new checksums where needed
+# verify=True,  write=False -> verify checksums for non-modified files
+# verify=True,  write=True  -> verify and write new checksums where needed
+# verify=False, write=True  -> ignore existing checksums, write new checksums where needed
 
 def verify_or_set_checksum(h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	wrote_checksum = None
