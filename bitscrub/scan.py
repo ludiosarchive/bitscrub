@@ -37,8 +37,8 @@ class ChecksumData(tuple):
 	_MARKER = object()
 
 	time_marked = property(operator.itemgetter(1))
-	mtime = property(operator.itemgetter(2))
-	checksum = property(operator.itemgetter(3))
+	mtime       = property(operator.itemgetter(2))
+	checksum    = property(operator.itemgetter(3))
 
 	def __new__(cls, time_marked, mtime, checksum):
 		return tuple.__new__(cls, (cls._MARKER, time_marked, mtime, checksum))
@@ -50,7 +50,7 @@ class ChecksumData(tuple):
 
 	def get_description(self):
 		marked_str = datetime.datetime.utcfromtimestamp(self.time_marked).isoformat()
-		mtime_str = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
+		mtime_str  = datetime.datetime.utcfromtimestamp(self.mtime).isoformat()
 		return "<ChecksumData marked at %s when mtime was %s; checksum=%r>" % (
 			marked_str, mtime_str, format(self.checksum, '08X'))
 
@@ -86,18 +86,18 @@ def decode_body(body):
 	return ChecksumData(time_marked, mtime, checksum)
 
 
-block_size = 64*1024
+_block_size   = 64 * 1024
 # We have single-threaded operation, so we can use the same block of memory
-mem = ffi.new('char[%d]' % block_size)
-arr = ffi.buffer(mem)
+_crc32c_mem   = ffi.new('char[%d]' % _block_size)
+_crc32c_array = ffi.buffer(_crc32c_mem)
 
 def crc32c_for_file(h):
 	c = 0
 	while True:
-		num_bytes_read = h.readinto(arr)
+		num_bytes_read = h.readinto(_crc32c_array)
 		if num_bytes_read == 0:
 			break
-		c = sse4_crc32c(c, mem, num_bytes_read)
+		c = sse4_crc32c(c, _crc32c_mem, num_bytes_read)
 	return c
 
 
