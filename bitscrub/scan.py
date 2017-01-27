@@ -282,7 +282,8 @@ def should_descend(verbose, f):
 	return True
 
 
-inode_to_crc32c = {}
+# (st_dev, st_ino) -> crc32
+cached_crc32c = {}
 
 def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
 	if f.islink():
@@ -296,23 +297,27 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 		except (OSError, IOError):
 			write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		else:
-			fstat = os.fstat(h.fileno())
-			size = fstat.st_size
-			if fstat.st_ino in inode_to_crc32c:
+			fstat     = os.fstat(h.fileno())
+			size      = fstat.st_size
+			# Include st_dev in the key because we may be scrubbing files on
+			# multiple devices that sometimes have the same inode (but are not
+			# the same file).
+			cache_key = (fstat.st_dev, fstat.st_ino)
+			if cache_key in cached_crc32c:
 				if verbose:
 					# No need to check inodes we've already checked
 					write_to_stderr("HARDLINK\t%r" % (h.name,))
 			else:
-				inode_to_crc32c[fstat.st_ino] = verify_or_set_checksum(
+				cached_crc32c[cache_key] = verify_or_set_checksum(
 					h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 
 		if h is not None:
-			checksum = inode_to_crc32c.get(fstat.st_ino)
+			checksum = cached_crc32c.get(cache_key)
 			##print "Existing checksum:", checksum
 			if checksum is None:
 				h.seek(0)
 				try:
-					checksum = inode_to_crc32c[fstat.st_ino] = crc32c_for_file(h)
+					checksum = cached_crc32c[cache_key] = crc32c_for_file(h)
 				except IOError:
 					pass
 			h.close()
