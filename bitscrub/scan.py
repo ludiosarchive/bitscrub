@@ -288,8 +288,8 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 		write_listing_line(listing, normalize_listing, base_dir, "S", None, None, f)
 	elif f.isfile():
 		checksum = None
-		size = None
-		h = None
+		size     = None
+		h        = None
 		try:
 			h = open(f.path, 'rb')
 		except (OSError, IOError):
