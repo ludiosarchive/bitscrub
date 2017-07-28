@@ -125,9 +125,10 @@ def set_checksum(h, verbose):
 	try:
 		xattr._fsetxattr(h.fileno(), XATTR_NAME, cd.encode())
 	except IOError as e:
-		# This will happen if the file was readable to us, but owned by someone
-		# else without giving us write permission.
-		assert "Permission denied" in repr(e), repr(e)
+		# "Permission denied" will happen if the file was readable to us, but
+		# owned by someone else without giving us write permission.
+		# "Operation not permitted" happens for some files on NTFS-3G mounts
+		assert "Permission denied" in repr(e) or "Operation not permitted" in repr(e), repr(e)
 		write_to_both_if_verbose("NOWRITE\t%r" % (h.name,), verbose)
 		# Since we did not actually write a checksum
 		return None
