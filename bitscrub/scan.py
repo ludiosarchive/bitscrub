@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """
 bitscrub
@@ -11,6 +11,8 @@ TODO:
 *	Notice when the mtime changes while the file is being read, and do
 	something different.
 """
+
+from __future__ import print_function
 
 import os
 import stat
@@ -28,8 +30,8 @@ import xattr
 from twisted.python.filepath import FilePath, LinkError
 
 
-XATTR_NAME = "user._C"
-VERSION = chr(11)
+XATTR_NAME = b"user._C"
+VERSION = bytes([11])
 
 
 class ChecksumData(tuple):
@@ -312,7 +314,7 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 
 		if h is not None:
 			checksum = cached_crc32c.get(cache_key)
-			##print "Existing checksum:", checksum
+			##print("Existing checksum:", checksum)
 			if checksum is None:
 				h.seek(0)
 				try:
@@ -371,7 +373,7 @@ def main():
 
 	for fname in args.path:
 		p = BetterFilePath(fname)
-		print p
+		print(p)
 
 		if p.isdir():
 			for f in p.walk(descend=functools.partial(should_descend, args.verbose)):
