@@ -5,9 +5,9 @@ bitscrub walks a directory tree and writes/updates/verifies the CRC32C of each f
 
 `(time_marked, mtime, checksum)` data is stored in the `user._C` xattr.
 
+
 Basic usage
 ---
-`-v/--verify`, `-w/--write`, and `-i/--inspect` can be combined.  If none are specified, files will be checked only for lack of checksum data or updated mtime.
 
 Write new checksums and update checksums where file has mtime > checksum time:
 
@@ -24,6 +24,7 @@ Write and verify checksums:
 Inspect checksum xattr:
 
     bitscrub -i FILENAME
+
 
 --help
 ---
