@@ -1,7 +1,7 @@
 bitscrub
 ===
 
-bitscrub walks a directory tree and writes/updates/verifies the CRC32C of each file to a xattr.  This is useful for detecting bitrot on filesystems with no data checksum functionality.
+bitscrub walks a directory tree and writes/updates/verifies the CRC32C of each file, stored a xattr.  This is useful for detecting bitrot on filesystems with no data checksum functionality.
 
 `(time_marked, mtime, checksum)` data is stored in the `user._C` xattr.
 
