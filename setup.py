@@ -21,5 +21,6 @@ setup(
 		"License :: OSI Approved :: MIT License",
 	],
 	packages=["bitscrub"],
+	scripts=["bin/bitscrub"],
 	install_requires=["pycrc32c", "xattr", "cffi", "Twisted"]
 )
