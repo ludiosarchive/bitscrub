@@ -9,7 +9,7 @@ bitscrub walks a directory tree and writes/updates/verifies the CRC32C of each f
 Basic usage
 ---
 
-Write new checksums and update checksums where file has mtime > checksum time:
+Write new checksums and update checksums where file has mtime != checksum time:
 
     bitscrub -w ~/
 
