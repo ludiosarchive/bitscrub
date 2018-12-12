@@ -362,7 +362,7 @@ def main():
 		inspect=args.inspect,
 		verbose=args.verbose,
 		normalize_listing=args.normalize_listing,
-		listing=open(args.listing, "wb") if args.listing else None
+		listing=open(args.listing, "w", encoding="utf-8") if args.listing else None
 	)
 
 	os.nice(5)
