@@ -1,10 +1,14 @@
 bitscrub
 ===
 
-bitscrub writes and verifies whole-file CRC32C checksums stored in a `user._C` xattr.
+bitscrub walks a directory tree and writes/updates/verifies the CRC32C of each file to a xattr.  This is useful for detecting bitrot on filesystems with no data checksum functionality.
+
+`(time_marked, mtime, checksum)` data is stored in the `user._C` xattr.
 
 Basic usage
 ---
+`-v/--verify`, `-w/--write`, and `-i/--inspect` can be combined.  If none are specified, files will be checked only for lack of checksum data or updated mtime.
+
 Write new checksums and update checksums where file has mtime > checksum time:
 
     bitscrub -w ~/
