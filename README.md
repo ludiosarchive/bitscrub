@@ -17,6 +17,8 @@ Verify checksums only:
 
     bitscrub -v ~/
 
+`-v` will print messages starting with `CORRUPT` if the CRC32C is up to date but does not match the file contents.
+
 Write and verify checksums:
 
     bitscrub -vw ~/
