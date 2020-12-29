@@ -337,7 +337,7 @@ def handle_path(f, verify, write, remove, inspect, verbose, listing, normalize_l
 					write_to_stderr("HARDLINK\t%r" % (h.name,))
 			else:
 				cached_crc32c[cache_key] = verify_or_set_checksum(
-					h, f, fstat, verify, write, remove, inspect, verbose, listing, normalize_listing, base_dir)
+					h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
 
 		if h is not None:
 			checksum = cached_crc32c.get(cache_key)
