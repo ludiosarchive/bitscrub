@@ -140,6 +140,29 @@ def set_checksum(h, verbose):
 	return checksum
 
 
+def remove_checksum(h, verbose):
+	fstat         = os.fstat(h.fileno())
+	mode          = fstat.st_mode
+	was_read_only = not mode & stat.S_IWRITE
+	if was_read_only:
+		# We need to unset the read-only flag before we can remove a xattr
+		try:
+			os.fchmod(h.fileno(), mode | stat.S_IWRITE)
+		except OSError:
+			write_to_both_if_verbose("NOCHMOD\t%r" % (h.name,), verbose)
+			return
+	try:
+		xattr._fremovexattr(h.fileno(), XATTR_NAME)
+	except IOError as e:
+		if e.errno == 61: # "No data available" i.e. no xattr set
+			pass
+		else:
+			write_to_both_if_verbose("NOREMOVE\t%r" % (h.name,), verbose)
+	finally:
+		if was_read_only:
+			os.fchmod(h.fileno(), mode)
+
+
 def write_to_both_if_verbose(msg, verbose):
 	sys.stdout.write(msg + "\n")
 	sys.stdout.flush()
@@ -286,7 +309,7 @@ def should_descend(verbose, f):
 # (st_dev, st_ino) -> crc32c
 cached_crc32c = {}
 
-def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, base_dir):
+def handle_path(f, verify, write, remove, inspect, verbose, listing, normalize_listing, base_dir):
 	if f.islink():
 		write_listing_line(listing, normalize_listing, base_dir, "S", None, None, f)
 	elif f.isfile():
@@ -298,6 +321,10 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 		except (OSError, IOError):
 			write_to_both_if_verbose("NOOPEN\t%r" % (f.path,), verbose)
 		else:
+			if remove:
+				remove_checksum(h, verbose)
+				return
+
 			fstat     = os.fstat(h.fileno())
 			size      = fstat.st_size
 			# Include st_dev in the key because we may be scrubbing files on
@@ -310,7 +337,7 @@ def handle_path(f, verify, write, inspect, verbose, listing, normalize_listing, 
 					write_to_stderr("HARDLINK\t%r" % (h.name,))
 			else:
 				cached_crc32c[cache_key] = verify_or_set_checksum(
-					h, f, fstat, verify, write, inspect, verbose, listing, normalize_listing, base_dir)
+					h, f, fstat, verify, write, remove, inspect, verbose, listing, normalize_listing, base_dir)
 
 		if h is not None:
 			checksum = cached_crc32c.get(cache_key)
@@ -345,6 +372,8 @@ def main():
 	parser.add_argument('-w', '--write', dest='write', action='store_true',
 		help="calculate and write checksums for files that "
 			"have no checksum, or have an updated mtime")
+	parser.add_argument('-r', '--remove', dest='remove', action='store_true',
+		help="remove checksums for files that have them")
 	parser.add_argument('-i', '--inspect', dest='inspect', action='store_true',
 		help="print information about existing checksum data")
 	parser.add_argument('-q', '--quiet', dest='verbose', action='store_false',
@@ -359,6 +388,7 @@ def main():
 	kwargs = dict(
 		verify=args.verify,
 		write=args.write,
+		remove=args.remove,
 		inspect=args.inspect,
 		verbose=args.verbose,
 		normalize_listing=args.normalize_listing,
